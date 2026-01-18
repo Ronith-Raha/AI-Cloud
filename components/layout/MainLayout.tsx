@@ -5,9 +5,10 @@ import { Navbar } from './Navbar';
 
 interface MainLayoutProps {
   children: ReactNode;
+  memoryCount?: number;
 }
 
-export function MainLayout({ children }: MainLayoutProps) {
+export function MainLayout({ children, memoryCount }: MainLayoutProps) {
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Background Effects */}
@@ -31,7 +32,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       </div>
 
       {/* Navigation */}
-      <Navbar />
+      <Navbar memoryCount={memoryCount} />
 
       {/* Main Content */}
       <main className="relative z-10 pt-16">

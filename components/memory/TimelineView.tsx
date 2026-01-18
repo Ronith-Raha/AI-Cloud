@@ -2,9 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, ChevronRight, Sparkles } from 'lucide-react';
+import { Calendar, ChevronRight } from 'lucide-react';
 import { GraphNode, CATEGORY_COLORS } from '@/types/nexus';
-import { mockInsights } from '@/lib/mockData';
 import { formatRelativeTime, cn } from '@/lib/utils';
 
 interface TimelineViewProps {
@@ -35,8 +34,6 @@ function TimelineNode({
   index: number;
 }) {
   const categoryColor = CATEGORY_COLORS[node.category] || { base: '#ffffff', glow: 'rgba(255,255,255,0.6)' };
-  const insight = mockInsights.find((i) => i.relatedMemoryIds.includes(node.id));
-
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -45,7 +42,8 @@ function TimelineNode({
       className={cn(
         'relative pl-8 pb-8 group cursor-pointer',
         'before:absolute before:left-[11px] before:top-0 before:bottom-0 before:w-px',
-        isHighlighted ? 'before:bg-white/40' : 'before:bg-white/10'
+        isHighlighted ? 'before:bg-white/40' : 'before:bg-white/10',
+        node.deletedAt && 'opacity-50'
       )}
       onClick={onClick}
     >
@@ -107,14 +105,6 @@ function TimelineNode({
             </span>
           ))}
         </div>
-
-        {/* AI Insight badge */}
-        {insight && (
-          <div className="mt-3 flex items-center gap-2 p-2 rounded-lg bg-gradient-to-r from-purple-500/10 to-cyan-500/10 border border-white/5">
-            <Sparkles className="w-3 h-3 text-purple-400" />
-            <span className="text-xs text-white/70">{insight.title}</span>
-          </div>
-        )}
 
         {/* Project badge */}
         {node.project && (

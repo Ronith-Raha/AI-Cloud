@@ -16,6 +16,8 @@ export interface Agent {
   capabilities: string[];
   memoryCount: number;
   lastInteraction: Date;
+  provider?: string;
+  model?: string;
 }
 
 // ============================================
@@ -47,6 +49,11 @@ export interface MemoryNode {
   sourceAgent: string; // Agent ID
   relatedMemories: string[]; // Memory IDs
   embedding?: number[]; // For semantic search (backend slot)
+  pinned?: boolean;
+  userEdited?: boolean;
+  isGroup?: boolean;
+  groupKey?: string;
+  deletedAt?: Date | null;
   metadata: {
     conversationId?: string;
     sentiment?: 'positive' | 'neutral' | 'negative';
@@ -122,12 +129,16 @@ export interface ChatMessage {
   timestamp: Date;
   agentId: string;
   memoryReferences?: MemoryReference[];
+  turnId?: string;
+  nodeId?: string;
+  error?: string;
 }
 
 export interface MemoryReference {
   memoryId: string;
   relevanceScore: number;
   snippet: string;
+  category?: string;
 }
 
 export interface ChatContext {
@@ -229,6 +240,8 @@ export const CATEGORY_COLORS: Record<string, { base: string; glow: string }> = {
   'Learning': { base: '#8B5CF6', glow: 'rgba(139, 92, 246, 0.6)' },
   'Health': { base: '#FF6B6B', glow: 'rgba(255, 107, 107, 0.6)' },
   'Finance': { base: '#4ADE80', glow: 'rgba(74, 222, 128, 0.6)' },
+  'Conversation': { base: '#4F46E5', glow: 'rgba(79, 70, 229, 0.6)' },
+  'Pinned': { base: '#F59E0B', glow: 'rgba(245, 158, 11, 0.6)' },
 };
 
 // ============================================

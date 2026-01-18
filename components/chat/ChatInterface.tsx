@@ -2,30 +2,47 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Sparkles, User, Bot, Paperclip, Mic } from 'lucide-react';
-import { Agent, ChatMessage, MemoryReference, CATEGORY_COLORS } from '@/types/nexus';
+import { Send, Sparkles, User, Bot, Square } from 'lucide-react';
+import { Agent, ChatMessage, GraphNode, CATEGORY_COLORS } from '@/types/nexus';
 import { DeepSearchVisualizer, useDeepSearch } from './DeepSearchVisualizer';
-import { mockMemories } from '@/lib/mockData';
 import { cn, generateId, formatTime } from '@/lib/utils';
+import { streamChatTurn } from '@/lib/api/client';
+import type { ChatTurnCompleteEvent, ChatTurnErrorEvent } from '@/lib/api/types';
+import { DEFAULT_MODEL, DEFAULT_PROVIDER } from '@/lib/agents';
 
 interface ChatInterfaceProps {
   agent: Agent;
+  projectId: string | null;
+  memoryNodes: GraphNode[];
+  initialMessages?: ChatMessage[];
+  onTurnComplete?: (payload: ChatTurnCompleteEvent & { userText: string }) => void;
 }
 
-export function ChatInterface({ agent }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome',
-      role: 'assistant',
-      content: `Hello! I'm ${agent.name}. I have access to ${agent.memoryCount} memories about you. How can I help you today?`,
-      timestamp: new Date(),
-      agentId: agent.id,
-    },
-  ]);
+export function ChatInterface({
+  agent,
+  projectId,
+  memoryNodes,
+  initialMessages,
+  onTurnComplete
+}: ChatInterfaceProps) {
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const base: ChatMessage[] = [
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: `Hello! I'm ${agent.name}. I have access to ${agent.memoryCount} memories about you. How can I help you today?`,
+        timestamp: new Date(),
+        agentId: agent.id,
+      },
+    ];
+    return initialMessages ? [...base, ...initialMessages] : base;
+  });
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { phase, startSearch, reset } = useDeepSearch();
+  const { phase, startSearch, reset } = useDeepSearch(memoryNodes);
+  const abortRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -36,7 +53,7 @@ export function ChatInterface({ agent }: ChatInterfaceProps) {
   }, [messages, phase]);
 
   const handleSend = async () => {
-    if (!input.trim() || phase.status !== 'idle') return;
+    if (!input.trim() || phase.status !== 'idle' || isStreaming || !projectId) return;
 
     const userMessage: ChatMessage = {
       id: generateId(),
@@ -46,28 +63,127 @@ export function ChatInterface({ agent }: ChatInterfaceProps) {
       agentId: agent.id,
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const assistantMessageId = generateId();
+    setMessages((prev) => [
+      ...prev,
+      userMessage,
+      {
+        id: assistantMessageId,
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+        agentId: agent.id,
+      }
+    ]);
     setInput('');
 
-    // Start deep search
-    const relevantMemories = await startSearch(input);
-
-    // Generate response
+    const searchPromise = startSearch(input);
     setIsTyping(true);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    setIsStreaming(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-    const assistantMessage: ChatMessage = {
-      id: generateId(),
-      role: 'assistant',
-      content: generateResponse(input, relevantMemories, agent),
-      timestamp: new Date(),
-      agentId: agent.id,
-      memoryReferences: relevantMemories,
-    };
+    const provider = agent.provider ?? DEFAULT_PROVIDER;
+    const model = agent.model ?? DEFAULT_MODEL;
+    if (!model.trim()) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          role: 'assistant',
+          content: 'Please select a model before sending a message.',
+          timestamp: new Date(),
+          agentId: agent.id,
+          error: 'Missing model'
+        }
+      ]);
+      setIsTyping(false);
+      setIsStreaming(false);
+      reset();
+      return;
+    }
 
-    setMessages((prev) => [...prev, assistantMessage]);
-    setIsTyping(false);
+    try {
+      await streamChatTurn({
+        payload: {
+          projectId,
+          provider: provider as "openai" | "anthropic" | "gemini",
+          model,
+          userText: input
+        },
+        signal: controller.signal,
+        onToken: (data) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    content: message.content + data.text
+                  }
+                : message
+            )
+          );
+        },
+        onComplete: (data) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    turnId: data.turnId,
+                    nodeId: data.nodeId
+                  }
+                : message
+            )
+          );
+          onTurnComplete?.({ ...data, userText: input });
+        },
+        onError: (data: ChatTurnErrorEvent) => {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantMessageId
+                ? {
+                    ...message,
+                    error: data.message,
+                    content: message.content || `Error: ${data.message}`
+                  }
+                : message
+            )
+          );
+        }
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        const message = error instanceof Error ? error.message : "Stream failed";
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === assistantMessageId
+              ? { ...msg, error: message, content: message }
+              : msg
+          )
+        );
+      }
+    } finally {
+      abortRef.current = null;
+      setIsTyping(false);
+      setIsStreaming(false);
+    }
+
+    const relevantMemories = await searchPromise;
+    if (relevantMemories.length > 0) {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantMessageId
+            ? { ...message, memoryReferences: relevantMemories }
+            : message
+        )
+      );
+    }
     reset();
+  };
+
+  const handleCancel = () => {
+    abortRef.current?.abort();
   };
 
   return (
@@ -80,6 +196,7 @@ export function ChatInterface({ agent }: ChatInterfaceProps) {
               key={message.id}
               message={message}
               agent={agent}
+              memoryNodes={memoryNodes}
             />
           ))}
         </AnimatePresence>
@@ -87,7 +204,7 @@ export function ChatInterface({ agent }: ChatInterfaceProps) {
         {/* Deep Search Visualizer */}
         <AnimatePresence>
           {phase.status !== 'idle' && phase.status !== 'complete' && (
-            <DeepSearchVisualizer phase={phase} />
+            <DeepSearchVisualizer phase={phase} memoryNodes={memoryNodes} />
           )}
         </AnimatePresence>
 
@@ -139,27 +256,29 @@ export function ChatInterface({ agent }: ChatInterfaceProps) {
               className="w-full px-4 py-3 pr-24 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/40 resize-none focus:outline-none focus:border-white/20 focus:ring-1 focus:ring-white/10"
               style={{ minHeight: '48px', maxHeight: '150px' }}
             />
-            <div className="absolute right-2 bottom-2 flex items-center gap-1">
-              <button className="p-2 text-white/40 hover:text-white/70 transition-colors">
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <button className="p-2 text-white/40 hover:text-white/70 transition-colors">
-                <Mic className="w-4 h-4" />
-              </button>
-            </div>
+            {/* Spacer for input right padding */}
           </div>
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || phase.status !== 'idle'}
-            className={cn(
-              'p-3 rounded-xl transition-all',
-              input.trim() && phase.status === 'idle'
-                ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white hover:opacity-90'
-                : 'bg-white/5 text-white/30 cursor-not-allowed'
-            )}
-          >
-            <Send className="w-5 h-5" />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={handleCancel}
+              className="p-3 rounded-xl transition-all bg-white/5 text-white/70 hover:bg-white/10"
+            >
+              <Square className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || phase.status !== 'idle' || !projectId}
+              className={cn(
+                'p-3 rounded-xl transition-all',
+                input.trim() && phase.status === 'idle' && projectId
+                  ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white hover:opacity-90'
+                  : 'bg-white/5 text-white/30 cursor-not-allowed'
+              )}
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          )}
         </div>
         <p className="mt-2 text-xs text-white/30 text-center">
           Press Enter to send • Shift+Enter for new line
@@ -169,7 +288,15 @@ export function ChatInterface({ agent }: ChatInterfaceProps) {
   );
 }
 
-function MessageBubble({ message, agent }: { message: ChatMessage; agent: Agent }) {
+function MessageBubble({
+  message,
+  agent,
+  memoryNodes
+}: {
+  message: ChatMessage;
+  agent: Agent;
+  memoryNodes: GraphNode[];
+}) {
   const isUser = message.role === 'user';
 
   return (
@@ -218,9 +345,9 @@ function MessageBubble({ message, agent }: { message: ChatMessage; agent: Agent 
             </p>
             <div className="flex flex-wrap gap-1">
               {message.memoryReferences.slice(0, 3).map((ref) => {
-                const memory = mockMemories.find((m) => m.id === ref.memoryId);
-                if (!memory) return null;
-                const color = CATEGORY_COLORS[memory.category];
+                const memory = memoryNodes.find((m) => m.id === ref.memoryId);
+                if (!memory && !ref.category) return null;
+                const color = CATEGORY_COLORS[ref.category ?? memory?.category ?? 'Conversation'];
 
                 return (
                   <span
@@ -231,7 +358,7 @@ function MessageBubble({ message, agent }: { message: ChatMessage; agent: Agent 
                       className="w-1.5 h-1.5 rounded-full"
                       style={{ backgroundColor: color?.base }}
                     />
-                    {memory.category}
+                    {ref.category ?? memory?.category ?? 'Conversation'}
                   </span>
                 );
               })}
@@ -246,70 +373,4 @@ function MessageBubble({ message, agent }: { message: ChatMessage; agent: Agent 
       </div>
     </motion.div>
   );
-}
-
-function generateResponse(
-  query: string,
-  memories: MemoryReference[],
-  agent: Agent
-): string {
-  const lowerQuery = query.toLowerCase();
-
-  // Context-aware responses based on memories and query
-  if (lowerQuery.includes('space') || lowerQuery.includes('fruit') || lowerQuery.includes('game')) {
-    return `Based on your memories, I can see you're working on the **Space Fruit Game** in Godot! 🚀
-
-Here's what I know:
-- You're using pixel art with modern lighting effects
-- You love neon glow effects (cyan and magenta are your go-to colors)
-- You've implemented orbital gravity mechanics for fruit collection
-- You have 5 worlds planned: Nebula Garden, Crystal Caves, Solar Winds, Asteroid Belt, and Black Hole
-
-Your target release is March 2026 on itch.io. Would you like help with any specific aspect of the game?`;
-  }
-
-  if (lowerQuery.includes('color') || lowerQuery.includes('neon') || lowerQuery.includes('aesthetic')) {
-    return `I've noticed a strong pattern in your preferences! 🎨
-
-You consistently gravitate toward **neon aesthetics** with these characteristics:
-- Primary colors: cyan (#00D9FF) and magenta (#FF00FF)
-- Influences: Synthwave, Cyberpunk, Blade Runner, Tron
-- Application: Both your Space Fruit Game and portfolio website use this style
-
-This isn't just a phase—it's become a defining characteristic of your visual identity. Your portfolio even features animated gradients with dark themes to feel "alive."`;
-  }
-
-  if (lowerQuery.includes('rust') || lowerQuery.includes('learning')) {
-    return `Looking at your learning journey with Rust! 📚
-
-**Progress so far:**
-- Completed Rustlings exercises ✓
-- Currently studying lifetimes (the tricky part!)
-- You find the borrow checker challenging but rewarding
-
-You've been at this for about 5 months as a hobby language. Based on your current pace, you're making solid progress. Would you like some resources for understanding lifetimes better?`;
-  }
-
-  if (lowerQuery.includes('work') || lowerQuery.includes('job')) {
-    return `From what I remember about your work situation:
-
-**Current Role:** Frontend developer at a fintech startup
-- Primary tech: React for dashboard components
-- Challenge: Legacy jQuery code that needs refactoring to React
-
-I sense some frustration with the legacy code situation. That's a common pain point! Would you like to discuss strategies for incremental refactoring, or would you prefer to vent a bit? 😄`;
-  }
-
-  // Default response
-  const memoryContext = memories
-    .slice(0, 2)
-    .map((m) => mockMemories.find((mem) => mem.id === m.memoryId)?.summary)
-    .filter(Boolean)
-    .join(', ');
-
-  return `I found ${memories.length} relevant memories to help answer that.${
-    memoryContext ? ` Related context: ${memoryContext}.` : ''
-  }
-
-Based on my understanding of you, I'd be happy to elaborate on any of these topics. What would you like to explore further?`;
 }

@@ -22,6 +22,7 @@ interface MemoryGraphProps {
   searchQuery: string;
   onNodeSelect: (node: GraphNode | null) => void;
   selectedNodeId: string | null;
+  onNodeUpdated?: () => void;
 }
 
 type SimNode = GraphNode & SimulationNodeDatum;
@@ -34,14 +35,14 @@ function GraphControls({ zoomLevel }: { zoomLevel: ZoomLevel }) {
     <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-20">
       <div className="bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg p-1 flex flex-col gap-1">
         <button
-          onClick={() => zoomIn(0.5)}
+          onClick={() => zoomIn(1.2)}
           className="w-10 h-10 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
         >
           <span className="text-xl font-light">+</span>
         </button>
         <div className="h-px bg-white/10" />
         <button
-          onClick={() => zoomOut(0.5)}
+          onClick={() => zoomOut(1.2)}
           className="w-10 h-10 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
         >
           <span className="text-xl font-light">−</span>
@@ -60,8 +61,16 @@ function GraphControls({ zoomLevel }: { zoomLevel: ZoomLevel }) {
   );
 }
 
-export function MemoryGraph({ data, searchQuery, onNodeSelect, selectedNodeId }: MemoryGraphProps) {
+export function MemoryGraph({
+  data,
+  searchQuery,
+  onNodeSelect,
+  selectedNodeId,
+  onNodeUpdated
+}: MemoryGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const transformRef = useRef<ReactZoomPanPinchRef | null>(null);
+  const pendingFitRef = useRef(0);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 800 });
   const [nodes, setNodes] = useState<SimNode[]>([]);
   const [links, setLinks] = useState<SimLink[]>([]);
@@ -128,9 +137,58 @@ export function MemoryGraph({ data, searchQuery, onNodeSelect, selectedNodeId }:
     };
   }, [data, dimensions]);
 
+  useEffect(() => {
+    pendingFitRef.current += 1;
+  }, [data.nodes.length, dimensions.width, dimensions.height]);
+
+  useEffect(() => {
+    if (!transformRef.current || nodes.length === 0 || pendingFitRef.current === 0) {
+      return;
+    }
+
+    const validNodes = nodes.filter((node) => Number.isFinite(node.x) && Number.isFinite(node.y));
+    if (validNodes.length === 0) return;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    validNodes.forEach((node) => {
+      const radius = node.radius ?? 30;
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+      minX = Math.min(minX, x - radius);
+      maxX = Math.max(maxX, x + radius);
+      minY = Math.min(minY, y - radius);
+      maxY = Math.max(maxY, y + radius);
+    });
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+    if (width <= 0 || height <= 0) return;
+
+    const padding = 80;
+    const scale = Math.min(
+      (dimensions.width - padding) / width,
+      (dimensions.height - padding) / height
+    );
+    const clampedScale = Math.min(2.5, Math.max(0.5, scale));
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const translateX = dimensions.width / 2 - centerX * clampedScale;
+    const translateY = dimensions.height / 2 - centerY * clampedScale;
+
+    transformRef.current.setTransform(translateX, translateY, clampedScale, 0);
+    pendingFitRef.current = 0;
+  }, [nodes, dimensions]);
+
   // Handle node selection and re-center
   const handleNodeClick = useCallback(
     (node: GraphNode) => {
+      if (node.isGroup) {
+        return;
+      }
       if (selectedNodeId === node.id) {
         onNodeSelect(null);
         return;
@@ -202,17 +260,18 @@ export function MemoryGraph({ data, searchQuery, onNodeSelect, selectedNodeId }:
     </defs>
   );
 
-  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId && !n.isGroup);
 
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden bg-black/50 rounded-xl">
       <TransformWrapper
-        initialScale={1}
+        ref={transformRef}
+        initialScale={0.8}
         minScale={0.5}
         maxScale={3}
         centerOnInit
         onTransformed={handleTransform}
-        wheel={{ step: 0.15 }}
+        wheel={{ step: 0.6 }}
         panning={{ disabled: false }}
         doubleClick={{ disabled: true }}
       >
@@ -293,19 +352,23 @@ export function MemoryGraph({ data, searchQuery, onNodeSelect, selectedNodeId }:
                 style={{ backgroundColor: CATEGORY_COLORS[hoveredNode.category]?.base }}
               />
               <span className="text-sm font-medium text-white">{hoveredNode.category}</span>
-              <span className="text-xs text-white/50">• {hoveredNode.type}</span>
+              <span className="text-xs text-white/50">
+                • {hoveredNode.isGroup ? 'Group' : hoveredNode.type}
+              </span>
             </div>
             <p className="text-sm text-white/80">{hoveredNode.summary}</p>
-            <div className="flex flex-wrap gap-1 mt-2">
-              {hoveredNode.tags.slice(0, 4).map((tag) => (
-                <span
-                  key={tag}
-                  className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-white/60"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
+            {!hoveredNode.isGroup && (
+              <div className="flex flex-wrap gap-1 mt-2">
+                {hoveredNode.tags.slice(0, 4).map((tag) => (
+                  <span
+                    key={tag}
+                    className="px-2 py-0.5 text-xs rounded-full bg-white/10 text-white/60"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -316,6 +379,7 @@ export function MemoryGraph({ data, searchQuery, onNodeSelect, selectedNodeId }:
           <NodeDetailPanel
             node={selectedNode}
             onClose={() => onNodeSelect(null)}
+            onNodeUpdated={onNodeUpdated}
           />
         )}
       </AnimatePresence>

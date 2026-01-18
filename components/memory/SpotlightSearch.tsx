@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Command, X } from 'lucide-react';
 import { GraphNode, CATEGORY_COLORS } from '@/types/nexus';
-import { searchMemories } from '@/lib/mockData';
 import { cn } from '@/lib/utils';
 
 interface SpotlightSearchProps {
@@ -12,11 +11,18 @@ interface SpotlightSearchProps {
   onClose: () => void;
   onSearch: (query: string) => void;
   onSelectNode: (node: GraphNode) => void;
+  nodes: GraphNode[];
 }
 
-export function SpotlightSearch({ isOpen, onClose, onSearch, onSelectNode }: SpotlightSearchProps) {
+export function SpotlightSearch({
+  isOpen,
+  onClose,
+  onSearch,
+  onSelectNode,
+  nodes
+}: SpotlightSearchProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<ReturnType<typeof searchMemories>>([]);
+  const [results, setResults] = useState<GraphNode[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -33,7 +39,7 @@ export function SpotlightSearch({ isOpen, onClose, onSearch, onSelectNode }: Spo
   // Handle search
   useEffect(() => {
     if (query.trim()) {
-      const searchResults = searchMemories(query);
+      const searchResults = searchNodes(query, nodes);
       setResults(searchResults);
       setSelectedIndex(0);
       onSearch(query);
@@ -162,14 +168,14 @@ export function SpotlightSearch({ isOpen, onClose, onSearch, onSelectNode }: Spo
                               {memory.content}
                             </p>
                             <div className="flex items-center gap-2 mt-2">
-                              {memory.tags.slice(0, 3).map((tag) => (
-                                <span
-                                  key={tag}
-                                  className="text-xs text-white/40 bg-white/5 px-1.5 py-0.5 rounded"
-                                >
-                                  #{tag}
-                                </span>
-                              ))}
+                          {memory.tags.slice(0, 3).map((tag) => (
+                            <span
+                              key={tag}
+                              className="text-xs text-white/40 bg-white/5 px-1.5 py-0.5 rounded"
+                            >
+                              #{tag}
+                            </span>
+                          ))}
                             </div>
                           </div>
                           {index === selectedIndex && (
@@ -206,6 +212,28 @@ export function SpotlightSearch({ isOpen, onClose, onSearch, onSelectNode }: Spo
       )}
     </AnimatePresence>
   );
+}
+
+function searchNodes(query: string, nodes: GraphNode[]) {
+  const lowerQuery = query.toLowerCase();
+  const keywords = lowerQuery.split(' ').filter((word) => word.length > 1);
+
+  return nodes
+    .map((node) => {
+      let score = 0;
+      keywords.forEach((keyword) => {
+        if (node.content.toLowerCase().includes(keyword)) score += 0.4;
+        if (node.summary.toLowerCase().includes(keyword)) score += 0.5;
+        if (node.tags.some((tag) => tag.toLowerCase().includes(keyword))) score += 0.2;
+        if (node.category.toLowerCase().includes(keyword)) score += 0.2;
+      });
+
+      return { node, score };
+    })
+    .filter(({ score }) => score > 0.2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map(({ node }) => node);
 }
 
 // Trigger button component

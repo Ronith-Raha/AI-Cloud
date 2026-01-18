@@ -1,21 +1,122 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Calendar, Tag, Link2, Sparkles, Bot } from 'lucide-react';
-import { GraphNode, CATEGORY_COLORS, AIInsight } from '@/types/nexus';
+import { X, Calendar, Tag, Sparkles, Pencil, Save, Trash2, Pin, PinOff, RotateCcw } from 'lucide-react';
+import { GraphNode, CATEGORY_COLORS } from '@/types/nexus';
 import { formatDateTime, formatRelativeTime } from '@/lib/utils';
-import { mockInsights, mockAgents, getRelatedMemories } from '@/lib/mockData';
+import { deleteGraphNode, editGraphNode, getGraphNode, restoreGraphNode } from '@/lib/api/client';
+import type { GraphNodeDetailResponse } from '@/lib/api/types';
 
 interface NodeDetailPanelProps {
   node: GraphNode;
   onClose: () => void;
+  onNodeUpdated?: () => void;
 }
 
-export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
+export function NodeDetailPanel({ node, onClose, onNodeUpdated }: NodeDetailPanelProps) {
   const categoryColor = CATEGORY_COLORS[node.category] || { base: '#ffffff', glow: 'rgba(255,255,255,0.6)' };
-  const sourceAgent = mockAgents.find((a) => a.id === node.sourceAgent);
-  const relatedMemories = getRelatedMemories(node.id);
-  const nodeInsight = mockInsights.find((i) => i.relatedMemoryIds.includes(node.id));
+  const [detail, setDetail] = useState<GraphNodeDetailResponse | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(node.summary);
+  const [draftSummary, setDraftSummary] = useState(node.content);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const isDeleted = useMemo(() => Boolean(node.deletedAt), [node.deletedAt]);
+
+  useEffect(() => {
+    if (node.isGroup || !/^[0-9a-f-]{36}$/i.test(node.id)) {
+      setDetail(null);
+      setDetailError(null);
+      return;
+    }
+    let isActive = true;
+    getGraphNode(node.id)
+      .then((response) => {
+        if (!isActive) return;
+        setDetail(response);
+        setDetailError(null);
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        const message =
+          error instanceof Error ? error.message : 'Failed to load details';
+        if (message.toLowerCase().includes('invalid node id')) {
+          setDetailError(null);
+          return;
+        }
+        setDetailError(message);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [node.id, node.isGroup]);
+
+  useEffect(() => {
+    setDraftTitle(node.summary);
+    setDraftSummary(node.content);
+  }, [node.summary, node.content]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await editGraphNode(node.id, {
+        title: draftTitle.trim() || undefined,
+        summary2sent: draftSummary.trim() || undefined
+      });
+      setIsEditing(false);
+      onNodeUpdated?.();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to save');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTogglePin = async () => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await editGraphNode(node.id, {
+        pinned: !node.pinned
+      });
+      onNodeUpdated?.();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to update pin');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await deleteGraphNode(node.id);
+      onNodeUpdated?.();
+      onClose();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to delete');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    setIsSaving(true);
+    setActionError(null);
+    try {
+      await restoreGraphNode(node.id);
+      onNodeUpdated?.();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Failed to restore');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <motion.div
@@ -52,7 +153,15 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
                 </>
               )}
             </div>
-            <h2 className="text-lg font-semibold text-white">{node.summary}</h2>
+            {isEditing ? (
+              <input
+                value={draftTitle}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            ) : (
+              <h2 className="text-lg font-semibold text-white">{node.summary}</h2>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -60,6 +169,54 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsEditing((prev) => !prev)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 text-xs text-white/70 hover:bg-white/10"
+          >
+            <Pencil className="w-3 h-3" />
+            {isEditing ? 'Cancel' : 'Edit'}
+          </button>
+          <button
+            onClick={handleTogglePin}
+            disabled={isSaving}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 text-xs text-white/70 hover:bg-white/10 disabled:opacity-50"
+          >
+            {node.pinned ? <PinOff className="w-3 h-3" /> : <Pin className="w-3 h-3" />}
+            {node.pinned ? 'Unpin' : 'Pin'}
+          </button>
+          {isDeleted ? (
+            <button
+              onClick={handleRestore}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-xs text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Restore
+            </button>
+          ) : (
+            <button
+              onClick={handleDelete}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-500/20 text-xs text-rose-200 hover:bg-rose-500/30 disabled:opacity-50"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </button>
+          )}
+          {isEditing && (
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/20 text-xs text-cyan-200 hover:bg-cyan-500/30 disabled:opacity-50"
+            >
+              <Save className="w-3 h-3" />
+              Save
+            </button>
+          )}
+          {actionError && <span className="text-xs text-rose-300">{actionError}</span>}
         </div>
 
         {/* Type badge */}
@@ -78,7 +235,16 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
         {/* Full Content */}
         <div>
           <h3 className="text-xs font-semibold uppercase text-white/50 mb-2">Memory Content</h3>
-          <p className="text-sm text-white/80 leading-relaxed">{node.content}</p>
+          {isEditing ? (
+            <textarea
+              value={draftSummary}
+              onChange={(event) => setDraftSummary(event.target.value)}
+              rows={4}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+            />
+          ) : (
+            <p className="text-sm text-white/80 leading-relaxed">{node.content}</p>
+          )}
         </div>
 
         {/* Project */}
@@ -99,7 +265,13 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
             Tags
           </h3>
           <div className="flex flex-wrap gap-2">
-            {node.tags.map((tag) => (
+            {Array.from(
+              new Set(
+                [...node.tags, node.userEdited ? 'edited' : null, node.pinned ? 'pinned' : null]
+                  .filter(Boolean)
+                  .map(String)
+              )
+            ).map((tag) => (
               <span
                 key={tag}
                 className="px-2 py-1 text-xs rounded-full bg-white/10 text-white/70 hover:bg-white/20 cursor-pointer transition-colors"
@@ -111,64 +283,34 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
         </div>
 
         {/* AI Insight */}
-        {nodeInsight && (
-          <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/20 to-cyan-500/20 border border-white/10">
-            <div className="flex items-center gap-2 mb-2">
-              <Sparkles className="w-4 h-4 text-purple-400" />
-              <h3 className="text-sm font-semibold text-white">{nodeInsight.title}</h3>
-            </div>
-            <p className="text-xs text-white/70">{nodeInsight.description}</p>
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-xs text-white/40">
-                {Math.round(nodeInsight.confidence * 100)}% confidence
-              </span>
-            </div>
+        <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-cyan-500/10 border border-white/10">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-4 h-4 text-purple-400" />
+            <h3 className="text-sm font-semibold text-white">Turn Details</h3>
           </div>
-        )}
-
-        {/* Source Agent */}
-        {sourceAgent && (
-          <div>
-            <h3 className="text-xs font-semibold uppercase text-white/50 mb-2 flex items-center gap-2">
-              <Bot className="w-3 h-3" />
-              Source Agent
-            </h3>
-            <div className="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/10">
-              <span className="text-2xl">{sourceAgent.avatar}</span>
+          {node.isGroup ? (
+            <p className="text-xs text-white/40">Group nodes summarize category clusters.</p>
+          ) : detail ? (
+            <div className="space-y-3 text-xs text-white/70">
               <div>
-                <p className="text-sm font-medium text-white">{sourceAgent.name}</p>
-                <p className="text-xs text-white/50">{sourceAgent.description}</p>
+                <p className="text-white/40 mb-1">User</p>
+                <p className="text-white/80">{detail.turn.userText}</p>
+              </div>
+              <div>
+                <p className="text-white/40 mb-1">Assistant</p>
+                <p className="text-white/80">{detail.turn.assistantText}</p>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-white/40">Model</span>
+                <span className="text-white/80">{detail.turn.provider} / {detail.turn.model}</span>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* Related Memories */}
-        {relatedMemories.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold uppercase text-white/50 mb-2 flex items-center gap-2">
-              <Link2 className="w-3 h-3" />
-              Related Memories ({relatedMemories.length})
-            </h3>
-            <div className="space-y-2">
-              {relatedMemories.slice(0, 3).map((memory) => (
-                <div
-                  key={memory.id}
-                  className="p-3 bg-white/5 rounded-lg border border-white/10 hover:bg-white/10 cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <div
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: CATEGORY_COLORS[memory.category]?.base }}
-                    />
-                    <span className="text-xs text-white/50">{memory.category}</span>
-                  </div>
-                  <p className="text-sm text-white/80">{memory.summary}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          ) : detailError ? (
+            <p className="text-xs text-rose-400">{detailError}</p>
+          ) : (
+            <p className="text-xs text-white/40">Loading turn details...</p>
+          )}
+        </div>
 
         {/* Timestamps */}
         <div>
@@ -188,24 +330,6 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
           </div>
         </div>
 
-        {/* Confidence */}
-        <div>
-          <h3 className="text-xs font-semibold uppercase text-white/50 mb-2">Confidence</h3>
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-2 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all"
-                style={{
-                  width: `${node.metadata.confidence * 100}%`,
-                  backgroundColor: categoryColor.base,
-                }}
-              />
-            </div>
-            <span className="text-sm text-white/70">
-              {Math.round(node.metadata.confidence * 100)}%
-            </span>
-          </div>
-        </div>
       </div>
     </motion.div>
   );

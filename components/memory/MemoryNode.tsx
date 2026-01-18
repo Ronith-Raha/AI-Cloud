@@ -29,7 +29,8 @@ export const MemoryNodeComponent = memo(function MemoryNodeComponent({
 
   // Determine visibility based on zoom level and node depth
   const shouldShow = zoomLevel >= (node.depth + 1);
-  const opacity = shouldShow ? 1 : 0;
+  const baseOpacity = shouldShow ? 1 : 0;
+  const opacity = node.deletedAt ? baseOpacity * 0.4 : baseOpacity;
   const scale = shouldShow ? 1 : 0;
 
   // Size based on zoom level
@@ -76,7 +77,8 @@ export const MemoryNodeComponent = memo(function MemoryNodeComponent({
         strokeWidth={isSelected ? 3 : 2}
         className={cn(
           'transition-all duration-200',
-          isHighlighted && 'stroke-white'
+          isHighlighted && 'stroke-white',
+          node.deletedAt && 'opacity-60'
         )}
       />
 

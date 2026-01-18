@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Database, Sparkles, Zap, CheckCircle2, Loader2 } from 'lucide-react';
-import { SearchPhase, MemoryReference, CATEGORY_COLORS } from '@/types/nexus';
-import { mockMemories } from '@/lib/mockData';
+import { GraphNode, SearchPhase, MemoryReference, CATEGORY_COLORS } from '@/types/nexus';
 import { cn } from '@/lib/utils';
 
 interface DeepSearchVisualizerProps {
   phase: SearchPhase;
+  memoryNodes: GraphNode[];
 }
 
 const phaseConfig = {
@@ -20,13 +20,14 @@ const phaseConfig = {
   complete: { icon: CheckCircle2, color: 'text-emerald-400', label: 'Complete' },
 };
 
-export function DeepSearchVisualizer({ phase }: DeepSearchVisualizerProps) {
+export function DeepSearchVisualizer({ phase, memoryNodes }: DeepSearchVisualizerProps) {
   if (phase.status === 'idle' || phase.status === 'complete') {
     return null;
   }
 
   const config = phaseConfig[phase.status];
   const Icon = config.icon;
+  const memoryLookup = new Map(memoryNodes.map((node) => [node.id, node]));
 
   return (
     <motion.div
@@ -76,9 +77,8 @@ export function DeepSearchVisualizer({ phase }: DeepSearchVisualizerProps) {
               Found {phase.count} relevant memories
             </p>
             {phase.memories.slice(0, 3).map((ref, index) => {
-              const memory = mockMemories.find((m) => m.id === ref.memoryId);
-              if (!memory) return null;
-              const categoryColor = CATEGORY_COLORS[memory.category];
+              const memory = memoryLookup.get(ref.memoryId);
+              const categoryColor = CATEGORY_COLORS[ref.category ?? memory?.category ?? 'Conversation'];
 
               return (
                 <motion.div
@@ -159,26 +159,32 @@ export function DeepSearchVisualizer({ phase }: DeepSearchVisualizerProps) {
 }
 
 // Simulates the deep search process
-export function useDeepSearch() {
+export function useDeepSearch(memoryNodes: GraphNode[]) {
   const [phase, setPhase] = useState<SearchPhase>({ status: 'idle' });
+  const runRef = useRef(0);
 
   const startSearch = async (query: string): Promise<MemoryReference[]> => {
+    const runId = ++runRef.current;
     // Phase 1: Searching
     setPhase({ status: 'searching', query });
     await sleep(1500);
+    if (runRef.current !== runId) return [];
 
     // Phase 2: Found
-    const relevantMemories = findRelevantMemories(query);
+    const relevantMemories = findRelevantMemories(query, memoryNodes);
     setPhase({ status: 'found', count: relevantMemories.length, memories: relevantMemories });
     await sleep(1200);
+    if (runRef.current !== runId) return relevantMemories;
 
     // Phase 3: Injecting
     setPhase({ status: 'injecting', memories: relevantMemories });
     await sleep(1000);
+    if (runRef.current !== runId) return relevantMemories;
 
     // Phase 4: Generating
     setPhase({ status: 'generating' });
     await sleep(2000);
+    if (runRef.current !== runId) return relevantMemories;
 
     // Phase 5: Complete
     setPhase({ status: 'complete' });
@@ -187,6 +193,7 @@ export function useDeepSearch() {
   };
 
   const reset = () => {
+    runRef.current += 1;
     setPhase({ status: 'idle' });
   };
 
@@ -197,11 +204,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function findRelevantMemories(query: string): MemoryReference[] {
+function findRelevantMemories(query: string, memoryNodes: GraphNode[]): MemoryReference[] {
   const lowerQuery = query.toLowerCase();
   const keywords = lowerQuery.split(' ').filter((w) => w.length > 2);
 
-  return mockMemories
+  return memoryNodes
     .map((memory) => {
       let score = 0;
 
@@ -220,6 +227,7 @@ function findRelevantMemories(query: string): MemoryReference[] {
         memoryId: memory.id,
         relevanceScore: Math.min(score, 1),
         snippet: memory.summary,
+        category: memory.category
       };
     })
     .filter((ref) => ref.relevanceScore > 0.1)

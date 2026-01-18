@@ -2,22 +2,35 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Clock, Grid3X3, List, Search, Command, Sparkles, Filter } from 'lucide-react';
+import { Brain, Clock, Grid3X3, List, Search, Command, Sparkles, Filter, EyeOff } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { MemoryGraph } from '@/components/memory/MemoryGraph';
 import { TimelineView } from '@/components/memory/TimelineView';
 import { SpotlightSearch, SpotlightTrigger } from '@/components/memory/SpotlightSearch';
-import { ViewMode, GraphNode, CATEGORY_COLORS } from '@/types/nexus';
-import { graphData, mockInsights, mockClusters } from '@/lib/mockData';
+import { ViewMode, GraphNode, GraphData, CATEGORY_COLORS } from '@/types/nexus';
 import { cn } from '@/lib/utils';
+import { useProjectId } from '@/lib/hooks/useProjectId';
+import { getGraphView } from '@/lib/api/client';
+import { mapGraphViewToGraphData } from '@/lib/api/graph';
+import { useSearchParams } from 'next/navigation';
 
 export default function MemoryPage() {
+  const { projectId } = useProjectId();
+  const searchParams = useSearchParams();
+  const [graphData, setGraphData] = useState<GraphData>({
+    nodes: [],
+    links: [],
+    clusters: []
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('categorical');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   // Keyboard shortcut for search
   useEffect(() => {
@@ -32,6 +45,32 @@ export default function MemoryPage() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const refreshGraph = useCallback(() => {
+    let isActive = true;
+    if (!projectId) return () => {};
+    setIsLoading(true);
+    getGraphView(projectId, 0, 50, showDeleted)
+      .then((view) => {
+        if (!isActive) return;
+        setGraphData(mapGraphViewToGraphData(view));
+        setLoadError(null);
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        setLoadError(error instanceof Error ? error.message : 'Failed to load graph');
+      })
+      .finally(() => {
+        if (!isActive) return;
+        setIsLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [projectId, showDeleted]);
+
+  useEffect(() => refreshGraph(), [refreshGraph]);
+
   const handleSearch = useCallback((query: string) => {
     setSearchQuery(query);
   }, []);
@@ -40,18 +79,27 @@ export default function MemoryPage() {
     setSelectedNodeId(node?.id || null);
   }, []);
 
+  useEffect(() => {
+    const nodeId = searchParams.get('nodeId');
+    if (!nodeId) return;
+    const exists = graphData.nodes.some((node) => node.id === nodeId);
+    if (exists) {
+      setSelectedNodeId(nodeId);
+    }
+  }, [searchParams, graphData.nodes]);
+
   // Filter nodes by selected categories
   const filteredData = {
     ...graphData,
     nodes: selectedCategories.length > 0
-      ? graphData.nodes.filter((node) => selectedCategories.includes(node.category))
+      ? graphData.nodes.filter((node: GraphNode) => selectedCategories.includes(node.category))
       : graphData.nodes,
   };
 
   const categories = Object.keys(CATEGORY_COLORS);
 
   return (
-    <MainLayout>
+    <MainLayout memoryCount={graphData.nodes.filter((node) => !node.isGroup).length}>
       <div className="h-[calc(100vh-64px)] flex flex-col">
         {/* Header */}
         <div className="flex-shrink-0 p-6 border-b border-white/10">
@@ -63,7 +111,7 @@ export default function MemoryPage() {
               <div>
                 <h1 className="text-2xl font-bold text-white">Memory Cloud</h1>
                 <p className="text-sm text-white/50">
-                  {graphData.nodes.length} memories • {mockClusters.length} clusters
+                  {graphData.nodes.filter((node) => !node.isGroup).length} memories
                 </p>
               </div>
             </div>
@@ -89,6 +137,19 @@ export default function MemoryPage() {
                     {selectedCategories.length}
                   </span>
                 )}
+              </button>
+
+              <button
+                onClick={() => setShowDeleted((prev) => !prev)}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 border rounded-xl transition-colors',
+                  showDeleted
+                    ? 'bg-white/10 border-white/20 text-white'
+                    : 'bg-white/5 border-white/10 text-white/60 hover:text-white hover:bg-white/10'
+                )}
+              >
+                <EyeOff className="w-4 h-4" />
+                <span className="text-sm">{showDeleted ? 'Hide deleted' : 'Show deleted'}</span>
               </button>
 
               {/* View mode toggle */}
@@ -139,9 +200,9 @@ export default function MemoryPage() {
                       <button
                         key={category}
                         onClick={() => {
-                          setSelectedCategories((prev) =>
+                          setSelectedCategories((prev: string[]) =>
                             isSelected
-                              ? prev.filter((c) => c !== category)
+                              ? prev.filter((c: string) => c !== category)
                               : [...prev, category]
                           );
                         }}
@@ -195,6 +256,7 @@ export default function MemoryPage() {
                     searchQuery={searchQuery}
                     onNodeSelect={handleNodeSelect}
                     selectedNodeId={selectedNodeId}
+                    onNodeUpdated={refreshGraph}
                   />
                 </motion.div>
               ) : (
@@ -207,7 +269,7 @@ export default function MemoryPage() {
                   className="h-full"
                 >
                   <TimelineView
-                    nodes={filteredData.nodes}
+                    nodes={filteredData.nodes.filter((node) => !node.isGroup)}
                     searchQuery={searchQuery}
                     onNodeSelect={handleNodeSelect}
                     selectedNodeId={selectedNodeId}
@@ -226,44 +288,11 @@ export default function MemoryPage() {
               </div>
 
               <div className="space-y-3">
-                {mockInsights.map((insight, index) => (
-                  <motion.div
-                    key={insight.id}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.1 }}
-                    className="p-4 rounded-xl bg-gradient-to-br from-white/5 to-white/[0.02] border border-white/10 hover:border-white/20 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <span
-                        className={cn(
-                          'px-2 py-0.5 text-xs rounded-full capitalize',
-                          insight.type === 'pattern' && 'bg-purple-500/20 text-purple-400',
-                          insight.type === 'growth' && 'bg-emerald-500/20 text-emerald-400',
-                          insight.type === 'connection' && 'bg-cyan-500/20 text-cyan-400',
-                          insight.type === 'prediction' && 'bg-yellow-500/20 text-yellow-400',
-                          insight.type === 'preference' && 'bg-pink-500/20 text-pink-400'
-                        )}
-                      >
-                        {insight.type}
-                      </span>
-                      <span className="text-xs text-white/30 ml-auto">
-                        {Math.round(insight.confidence * 100)}%
-                      </span>
-                    </div>
-                    <h3 className="text-sm font-medium text-white mb-1">
-                      {insight.title}
-                    </h3>
-                    <p className="text-xs text-white/60 line-clamp-3">
-                      {insight.description}
-                    </p>
-                    <div className="mt-2 flex items-center gap-1">
-                      <span className="text-xs text-white/30">
-                        {insight.relatedMemoryIds.length} related memories
-                      </span>
-                    </div>
-                  </motion.div>
-                ))}
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                  <p className="text-xs text-white/50">
+                    Insights will appear here as your graph grows.
+                  </p>
+                </div>
               </div>
 
               {/* Quick stats */}
@@ -272,24 +301,40 @@ export default function MemoryPage() {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-white/50">Total Memories</span>
-                    <span className="text-white">{graphData.nodes.length}</span>
+                    <span className="text-white">
+                      {graphData.nodes.filter((node) => !node.isGroup).length}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-white/50">Categories</span>
-                    <span className="text-white">{categories.length}</span>
+                    <span className="text-white">
+                      {new Set(
+                        graphData.nodes.filter((n) => !n.isGroup).map((n: GraphNode) => n.category)
+                      ).size}
+                    </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-white/50">AI Insights</span>
-                    <span className="text-white">{mockInsights.length}</span>
+                    <span className="text-white">0</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-white/50">Projects</span>
                     <span className="text-white">
-                      {new Set(graphData.nodes.filter((n) => n.project).map((n) => n.project)).size}
+                      {new Set(
+                        graphData.nodes
+                          .filter((n: GraphNode) => !n.isGroup && n.project)
+                          .map((n: GraphNode) => n.project)
+                      ).size}
                     </span>
                   </div>
                 </div>
               </div>
+              {isLoading && (
+                <p className="text-xs text-white/40">Loading graph...</p>
+              )}
+              {loadError && (
+                <p className="text-xs text-rose-400">{loadError}</p>
+              )}
             </div>
           </div>
         </div>
@@ -301,6 +346,7 @@ export default function MemoryPage() {
         onClose={() => setIsSearchOpen(false)}
         onSearch={handleSearch}
         onSelectNode={handleNodeSelect}
+        nodes={graphData.nodes.filter((node) => !node.isGroup)}
       />
     </MainLayout>
   );

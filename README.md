@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+This is the Nexus web UI (Next.js App Router). It connects to the backend API over HTTP and SSE.
 
 ## Getting Started
 
-First, run the development server:
+### Environment variables
+
+Create a `.env.local` in `designdemo/`:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
+# Optional auth headers if your backend expects them
+# NEXT_PUBLIC_API_KEY=your-api-key
+# NEXT_PUBLIC_AUTH_TOKEN=your-bearer-token
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Run both apps locally
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Backend (AI-Cloud) runs on port 3000:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd AI-Cloud
+npm install
+npm run dev
+```
 
-## Learn More
+Frontend (designdemo) runs on port 3001:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+cd designdemo
+npm install
+set PORT=3001 && npm run dev
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Open [http://localhost:3001](http://localhost:3001).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Switching to Vercel staging
 
-## Deploy on Vercel
+Set `NEXT_PUBLIC_API_BASE_URL` to your deployed backend base URL:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+NEXT_PUBLIC_API_BASE_URL=https://your-backend-staging.vercel.app
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Notes
+
+- The chat endpoint uses `POST /api/chat/turn` with SSE streaming.
+- The frontend reads `response.body` as a stream and parses `event:` / `data:` frames.
+- The UI never calls relative `/api/*`; all requests go through `NEXT_PUBLIC_API_BASE_URL`.
