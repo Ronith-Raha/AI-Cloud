@@ -37,6 +37,7 @@ export default function ChatPage() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [pendingTurnId, setPendingTurnId] = useState<string | null>(null);
+  const [focusTurnId, setFocusTurnId] = useState<string | null>(null);
   const [showRightPanel, setShowRightPanel] = useState(false);
   const [isClient, setIsClient] = useState(false);
 
@@ -123,6 +124,7 @@ export default function ChatPage() {
     const turnId = searchParams.get('turnId');
     if (turnId) {
       setPendingTurnId(turnId);
+      setFocusTurnId(turnId);
     }
   }, [searchParams]);
 
@@ -440,6 +442,8 @@ export default function ChatPage() {
               projectId={projectId}
               memoryNodes={realNodes}
               initialMessages={initialMessages ?? undefined}
+              targetTurnId={focusTurnId}
+              onTurnFocusHandled={() => setFocusTurnId(null)}
               onTurnComplete={(payload) => {
                 if (!projectId) return;
                 getGraphView(projectId, 0, 50)

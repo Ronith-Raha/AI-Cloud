@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Calendar, Tag, Sparkles, Pencil, Save, Trash2, Pin, PinOff, RotateCcw } from 'lucide-react';
+import { X, Calendar, Tag, MessageSquare, Pencil, Save, Trash2, Pin, PinOff, RotateCcw } from 'lucide-react';
 import { GraphNode, CATEGORY_COLORS } from '@/types/nexus';
 import { formatDateTime, formatRelativeTime } from '@/lib/utils';
 import { deleteGraphNode, editGraphNode, getGraphNode, restoreGraphNode } from '@/lib/api/client';
 import type { GraphNodeDetailResponse } from '@/lib/api/types';
+import { useRouter } from 'next/navigation';
 
 interface NodeDetailPanelProps {
   node: GraphNode;
@@ -24,6 +25,8 @@ export function NodeDetailPanel({ node, onClose, onNodeUpdated }: NodeDetailPane
   const [actionError, setActionError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const isDeleted = useMemo(() => Boolean(node.deletedAt), [node.deletedAt]);
+  const router = useRouter();
+  const chatTurnId = node.turnId ?? detail?.turn.id ?? null;
 
   useEffect(() => {
     if (node.isGroup || !/^[0-9a-f-]{36}$/i.test(node.id)) {
@@ -160,7 +163,7 @@ export function NodeDetailPanel({ node, onClose, onNodeUpdated }: NodeDetailPane
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
               />
             ) : (
-              <h2 className="text-lg font-semibold text-white">{node.summary}</h2>
+            <h2 className="text-lg font-semibold text-white">{node.summary}</h2>
             )}
           </div>
           <button
@@ -243,7 +246,7 @@ export function NodeDetailPanel({ node, onClose, onNodeUpdated }: NodeDetailPane
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
             />
           ) : (
-            <p className="text-sm text-white/80 leading-relaxed">{node.content}</p>
+          <p className="text-sm text-white/80 leading-relaxed">{node.content}</p>
           )}
         </div>
 
@@ -284,33 +287,26 @@ export function NodeDetailPanel({ node, onClose, onNodeUpdated }: NodeDetailPane
 
         {/* AI Insight */}
         <div className="p-4 rounded-xl bg-gradient-to-br from-purple-500/10 to-cyan-500/10 border border-white/10">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="w-4 h-4 text-purple-400" />
-            <h3 className="text-sm font-semibold text-white">Turn Details</h3>
-          </div>
+            <div className="flex items-center gap-2 mb-2">
+            <MessageSquare className="w-4 h-4 text-purple-400" />
+            <h3 className="text-sm font-semibold text-white">Open Chat</h3>
+            </div>
           {node.isGroup ? (
             <p className="text-xs text-white/40">Group nodes summarize category clusters.</p>
-          ) : detail ? (
-            <div className="space-y-3 text-xs text-white/70">
-              <div>
-                <p className="text-white/40 mb-1">User</p>
-                <p className="text-white/80">{detail.turn.userText}</p>
-              </div>
-              <div>
-                <p className="text-white/40 mb-1">Assistant</p>
-                <p className="text-white/80">{detail.turn.assistantText}</p>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-white/40">Model</span>
-                <span className="text-white/80">{detail.turn.provider} / {detail.turn.model}</span>
-              </div>
-            </div>
+          ) : chatTurnId ? (
+            <button
+              onClick={() => router.push(`/chat?turnId=${chatTurnId}`)}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white/5 text-xs text-white/80 hover:bg-white/10"
+                >
+              <MessageSquare className="w-3 h-3" />
+              View full chat
+            </button>
           ) : detailError ? (
             <p className="text-xs text-rose-400">{detailError}</p>
           ) : (
-            <p className="text-xs text-white/40">Loading turn details...</p>
+            <p className="text-xs text-white/40">Chat link unavailable.</p>
           )}
-        </div>
+          </div>
 
         {/* Timestamps */}
         <div>

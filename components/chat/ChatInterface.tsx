@@ -16,6 +16,8 @@ interface ChatInterfaceProps {
   memoryNodes: GraphNode[];
   initialMessages?: ChatMessage[];
   onTurnComplete?: (payload: ChatTurnCompleteEvent & { userText: string }) => void;
+  targetTurnId?: string | null;
+  onTurnFocusHandled?: () => void;
 }
 
 export function ChatInterface({
@@ -23,7 +25,9 @@ export function ChatInterface({
   projectId,
   memoryNodes,
   initialMessages,
-  onTurnComplete
+  onTurnComplete,
+  targetTurnId,
+  onTurnFocusHandled
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const base: ChatMessage[] = [
@@ -40,6 +44,8 @@ export function ChatInterface({
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [highlightTurnId, setHighlightTurnId] = useState<string | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { phase, startSearch, reset } = useDeepSearch(memoryNodes);
   const abortRef = useRef<AbortController | null>(null);
@@ -65,6 +71,21 @@ export function ChatInterface({
     ];
     setMessages([...base, ...initialMessages]);
   }, [initialMessages, agent.id, agent.name, agent.memoryCount]);
+
+  useEffect(() => {
+    if (!targetTurnId) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const el = container.querySelector(`[data-turn-id="${targetTurnId}"]`) as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightTurnId(targetTurnId);
+    const timer = window.setTimeout(() => {
+      setHighlightTurnId(null);
+      onTurnFocusHandled?.();
+    }, 2000);
+    return () => window.clearTimeout(timer);
+  }, [targetTurnId, messages.length, onTurnFocusHandled]);
 
   const handleSend = async () => {
     if (!input.trim() || phase.status !== 'idle' || isStreaming || !projectId) return;
@@ -203,7 +224,7 @@ export function ChatInterface({
   return (
     <div className="flex flex-col h-full">
       {/* Messages area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         <AnimatePresence initial={false}>
           {messages.map((message) => (
             <MessageBubble
@@ -211,6 +232,7 @@ export function ChatInterface({
               message={message}
               agent={agent}
               memoryNodes={memoryNodes}
+              highlight={Boolean(message.turnId && message.turnId === highlightTurnId)}
             />
           ))}
         </AnimatePresence>
@@ -305,11 +327,13 @@ export function ChatInterface({
 function MessageBubble({
   message,
   agent,
-  memoryNodes
+  memoryNodes,
+  highlight
 }: {
   message: ChatMessage;
   agent: Agent;
   memoryNodes: GraphNode[];
+  highlight: boolean;
 }) {
   const isUser = message.role === 'user';
 
@@ -317,6 +341,7 @@ function MessageBubble({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
+      data-turn-id={message.turnId}
       className={cn('flex gap-3', isUser && 'flex-row-reverse')}
     >
       {/* Avatar */}
@@ -342,7 +367,8 @@ function MessageBubble({
             'px-4 py-3 rounded-2xl',
             isUser
               ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-white/10 rounded-tr-sm'
-              : 'bg-white/5 border border-white/10 rounded-tl-sm'
+              : 'bg-white/5 border border-white/10 rounded-tl-sm',
+            highlight && 'ring-1 ring-cyan-400/70 shadow-[0_0_12px_rgba(34,211,238,0.35)]'
           )}
         >
           <p className="text-sm text-white/90 whitespace-pre-wrap">

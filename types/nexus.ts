@@ -88,6 +88,7 @@ export interface GraphNode extends MemoryNode {
   fy?: number | null; // Fixed y position
   radius: number;
   depth: number; // 0 = category, 1 = subcategory, 2 = memory
+  turnId?: string;
 }
 
 export interface GraphLink {

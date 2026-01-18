@@ -75,7 +75,8 @@ function mapNode(node: VizNode): GraphNode {
       confidence: node.userEdited ? 0.9 : 0.7
     },
     radius: node.pinned ? 42 : 32,
-    depth: node.pinned ? 1 : 2
+    depth: node.pinned ? 1 : 2,
+    turnId: node.turnId
   };
 }
 
