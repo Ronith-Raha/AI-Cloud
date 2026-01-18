@@ -20,11 +20,12 @@ const updateSchema = z
 
 export async function PATCH(
   request: Request,
-  context: { params?: { turnId?: string } }
+  context: { params: Promise<{ turnId: string }> }
 ) {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
-  const turnId = context.params?.turnId ?? segments.at(-1);
+  const params = await context.params;
+  const turnId = params?.turnId ?? segments.at(-1);
   const parsed = turnIdSchema.safeParse(turnId);
   if (!parsed.success) {
     return jsonError(apiError("bad_request", "Invalid turn id", 400));

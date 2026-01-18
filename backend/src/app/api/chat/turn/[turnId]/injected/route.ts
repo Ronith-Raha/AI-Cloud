@@ -12,11 +12,12 @@ const turnIdSchema = z.string().uuid();
 
 export async function GET(
   request: Request,
-  context: { params?: { turnId?: string } }
+  context: { params: Promise<{ turnId: string }> }
 ) {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
-  const turnId = context.params?.turnId ?? segments.at(-2);
+  const params = await context.params;
+  const turnId = params?.turnId ?? segments.at(-2);
   const parsed = turnIdSchema.safeParse(turnId);
   if (!parsed.success) {
     return jsonError(apiError("bad_request", "Invalid turn id", 400));
