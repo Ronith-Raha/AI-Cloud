@@ -117,6 +117,14 @@ export default function ChatPage() {
   }, [agents, selectedAgent.id]);
 
   useEffect(() => {
+    if (selectedAgent.provider === provider && selectedAgent.model === model) return;
+    const next = agents.find((agent) => agent.id === selectedAgent.id) ?? agents[0];
+    if (next) {
+      setSelectedAgent(next);
+    }
+  }, [agents, provider, model, selectedAgent.id, selectedAgent.provider, selectedAgent.model]);
+
+  useEffect(() => {
     setIsClient(true);
   }, []);
 
