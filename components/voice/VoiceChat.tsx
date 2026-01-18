@@ -3,20 +3,35 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, Phone, PhoneOff, Volume2 } from 'lucide-react';
+import { Track } from 'livekit-client';
 import { CloudShape } from './CloudShape';
+import { useSession, AgentState } from '@/lib/livekit';
 import { cn } from '@/lib/utils';
 
-type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 type VoiceState = 'idle' | 'listening' | 'processing' | 'speaking';
 
 interface VoiceChatProps {
   onStateChange?: (state: VoiceState) => void;
-  compact?: boolean; // Mobile compact mode
+  compact?: boolean;
+  agentName?: string;
 }
 
-export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
-  const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
-  const [voiceState, setVoiceState] = useState<VoiceState>('idle');
+// Map LiveKit agent state to our voice state
+function mapAgentStateToVoiceState(agentState: AgentState): VoiceState {
+  switch (agentState) {
+    case 'listening':
+      return 'listening';
+    case 'thinking':
+      return 'processing';
+    case 'speaking':
+      return 'speaking';
+    default:
+      return 'idle';
+  }
+}
+
+export function VoiceChat({ onStateChange, compact = false, agentName }: VoiceChatProps) {
+  const { room, status, agentState, error, connect, disconnect } = useSession({ agentName });
   const [isMuted, setIsMuted] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const [transcript, setTranscript] = useState<string[]>([]);
@@ -24,166 +39,129 @@ export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
-  // Simulate audio level analysis
+  const voiceState = mapAgentStateToVoiceState(agentState);
+
+  // Analyze audio levels from local microphone
   const analyzeAudio = useCallback(() => {
-    if (analyserRef.current && voiceState !== 'idle') {
+    if (analyserRef.current && status === 'connected' && !isMuted) {
       const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
       analyserRef.current.getByteFrequencyData(dataArray);
 
-      // Calculate average level
       const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
       const normalizedLevel = Math.min(average / 128, 1);
       setAudioLevel(normalizedLevel);
 
       animationFrameRef.current = requestAnimationFrame(analyzeAudio);
     }
-  }, [voiceState]);
+  }, [status, isMuted]);
 
-  // Start audio capture
-  const startAudioCapture = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
+  // Set up audio analysis when room is connected
+  useEffect(() => {
+    if (room && status === 'connected') {
+      const setupAudioAnalysis = async () => {
+        try {
+          const localParticipant = room.localParticipant;
+          const audioTrack = localParticipant.getTrackPublication(Track.Source.Microphone);
 
-      audioContextRef.current = new AudioContext();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
+          if (audioTrack?.track?.mediaStream) {
+            audioContextRef.current = new AudioContext();
+            analyserRef.current = audioContextRef.current.createAnalyser();
+            analyserRef.current.fftSize = 256;
 
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      source.connect(analyserRef.current);
+            const source = audioContextRef.current.createMediaStreamSource(
+              audioTrack.track.mediaStream
+            );
+            source.connect(analyserRef.current);
+            analyzeAudio();
+          }
+        } catch (err) {
+          console.error('Failed to set up audio analysis:', err);
+        }
+      };
 
-      analyzeAudio();
-    } catch (error) {
-      console.error('Failed to access microphone:', error);
+      setupAudioAnalysis();
     }
-  };
 
-  // Stop audio capture
-  const stopAudioCapture = () => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-    }
-    setAudioLevel(0);
-  };
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, [room, status, analyzeAudio]);
 
   // Handle connection
   const handleConnect = async () => {
-    if (connectionState === 'disconnected') {
-      setConnectionState('connecting');
-
-      // Simulate connection delay
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-
-      await startAudioCapture();
-      setConnectionState('connected');
-      setVoiceState('listening');
+    if (status === 'disconnected' || status === 'error') {
+      await connect();
     } else {
-      stopAudioCapture();
-      setConnectionState('disconnected');
-      setVoiceState('idle');
+      disconnect();
       setCurrentTranscript('');
+      setAudioLevel(0);
     }
   };
 
   // Handle mute toggle
-  const handleMuteToggle = () => {
-    setIsMuted(!isMuted);
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getAudioTracks().forEach((track) => {
-        track.enabled = isMuted; // Toggle (if was muted, enable)
-      });
+  const handleMuteToggle = async () => {
+    if (room) {
+      const newMuted = !isMuted;
+      await room.localParticipant.setMicrophoneEnabled(!newMuted);
+      setIsMuted(newMuted);
+      if (newMuted) {
+        setAudioLevel(0);
+      }
     }
   };
-
-  // Simulate voice interaction cycle
-  useEffect(() => {
-    if (connectionState !== 'connected') return;
-
-    const simulateConversation = () => {
-      // Simulate listening -> processing -> speaking cycle
-      const cycle = async () => {
-        // Listening phase (3-5 seconds)
-        setVoiceState('listening');
-        setCurrentTranscript('');
-
-        // Simulate user speaking
-        const userPhrases = [
-          'Tell me about the weather today',
-          'What meetings do I have scheduled?',
-          'Play some relaxing music',
-          'Set a reminder for tomorrow',
-        ];
-        const randomPhrase = userPhrases[Math.floor(Math.random() * userPhrases.length)];
-
-        // Gradually show transcript
-        for (let i = 0; i <= randomPhrase.length; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
-          setCurrentTranscript(randomPhrase.slice(0, i));
-        }
-
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        // Processing phase
-        setVoiceState('processing');
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Speaking phase
-        setVoiceState('speaking');
-        setTranscript((prev) => [...prev.slice(-4), `You: ${randomPhrase}`]);
-        setCurrentTranscript('');
-
-        // Simulate AI response
-        const responses = [
-          "I'd be happy to help with that!",
-          'Let me check that for you.',
-          'Sure, processing your request now.',
-          "I've got the information you need.",
-        ];
-        const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        setTranscript((prev) => [...prev.slice(-4), `AI: ${randomResponse}`]);
-
-        // Back to listening
-        setVoiceState('listening');
-      };
-
-      const interval = setInterval(cycle, 8000);
-      cycle(); // Start immediately
-
-      return () => clearInterval(interval);
-    };
-
-    const cleanup = simulateConversation();
-    return cleanup;
-  }, [connectionState]);
 
   // Notify parent of state changes
   useEffect(() => {
     onStateChange?.(voiceState);
   }, [voiceState, onStateChange]);
 
-  // Cleanup on unmount
+  // Listen for transcription events from the room
   useEffect(() => {
-    return () => {
-      stopAudioCapture();
+    if (!room) return;
+
+    const handleDataReceived = (payload: Uint8Array) => {
+      try {
+        const decoder = new TextDecoder();
+        const message = JSON.parse(decoder.decode(payload));
+
+        if (message.type === 'transcription') {
+          if (message.role === 'user') {
+            setCurrentTranscript(message.text);
+            if (message.final) {
+              setTranscript((prev) => [...prev.slice(-4), `You: ${message.text}`]);
+              setCurrentTranscript('');
+            }
+          } else if (message.role === 'assistant' && message.final) {
+            setTranscript((prev) => [...prev.slice(-4), `AI: ${message.text}`]);
+          }
+        }
+      } catch {
+        // Ignore non-JSON messages
+      }
     };
-  }, []);
+
+    room.on('dataReceived', handleDataReceived);
+    return () => {
+      room.off('dataReceived', handleDataReceived);
+    };
+  }, [room]);
+
+  const connectionState = status === 'connecting' ? 'connecting' : status === 'connected' ? 'connected' : 'disconnected';
 
   return (
-    <div className={cn(
-      "flex flex-col items-center justify-center gap-4 md:gap-8",
-      compact ? "min-h-[400px]" : "min-h-[600px]"
-    )}>
+    <div
+      className={cn(
+        'flex flex-col items-center justify-center gap-4 md:gap-8',
+        compact ? 'min-h-[400px]' : 'min-h-[600px]'
+      )}
+    >
       {/* Status indicator */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
@@ -199,20 +177,35 @@ export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
           )}
         />
         <span className="text-sm text-white/60 capitalize">
-          {connectionState === 'connected'
+          {error
+            ? 'Error'
+            : connectionState === 'connected'
             ? voiceState === 'listening'
               ? 'Listening...'
               : voiceState === 'processing'
-              ? 'Processing...'
+              ? 'Thinking...'
               : voiceState === 'speaking'
               ? 'Speaking...'
+              : agentState === 'initializing'
+              ? 'Connecting to agent...'
               : 'Connected'
             : connectionState}
         </span>
       </motion.div>
 
-      {/* Cloud animated shape - smaller on mobile */}
-      <div className={cn(compact ? "scale-75 md:scale-100" : "")}>
+      {/* Error message */}
+      {error && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-sm text-red-400 text-center max-w-xs"
+        >
+          {error}
+        </motion.p>
+      )}
+
+      {/* Cloud animated shape */}
+      <div className={cn(compact ? 'scale-75 md:scale-100' : '')}>
         <CloudShape
           isListening={voiceState === 'listening' && !isMuted}
           isSpeaking={voiceState === 'speaking'}
@@ -229,10 +222,9 @@ export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
             exit={{ opacity: 0, y: -10 }}
             className="h-8 text-center"
           >
-            <p className={cn(
-              "text-white/80",
-              compact ? "text-base" : "text-lg"
-            )}>{currentTranscript}</p>
+            <p className={cn('text-white/80', compact ? 'text-base' : 'text-lg')}>
+              {currentTranscript}
+            </p>
           </motion.div>
         )}
       </AnimatePresence>
@@ -255,7 +247,11 @@ export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
               : 'bg-white/10 border-white/20 text-white hover:bg-white/20'
           )}
         >
-          {isMuted ? <MicOff className={cn(compact ? "w-5 h-5" : "w-6 h-6")} /> : <Mic className={cn(compact ? "w-5 h-5" : "w-6 h-6")} />}
+          {isMuted ? (
+            <MicOff className={cn(compact ? 'w-5 h-5' : 'w-6 h-6')} />
+          ) : (
+            <Mic className={cn(compact ? 'w-5 h-5' : 'w-6 h-6')} />
+          )}
         </motion.button>
 
         {/* Connect/Disconnect button */}
@@ -274,16 +270,16 @@ export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
           )}
         >
           {connectionState === 'disconnected' ? (
-            <Phone className={cn(compact ? "w-6 h-6" : "w-8 h-8")} />
+            <Phone className={cn(compact ? 'w-6 h-6' : 'w-8 h-8')} />
           ) : connectionState === 'connecting' ? (
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
             >
-              <Phone className={cn(compact ? "w-6 h-6" : "w-8 h-8")} />
+              <Phone className={cn(compact ? 'w-6 h-6' : 'w-8 h-8')} />
             </motion.div>
           ) : (
-            <PhoneOff className={cn(compact ? "w-6 h-6" : "w-8 h-8")} />
+            <PhoneOff className={cn(compact ? 'w-6 h-6' : 'w-8 h-8')} />
           )}
         </motion.button>
 
@@ -292,21 +288,19 @@ export function VoiceChat({ onStateChange, compact = false }: VoiceChatProps) {
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           className={cn(
-            "rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all",
+            'rounded-full bg-white/10 border border-white/20 text-white hover:bg-white/20 transition-all',
             compact ? 'p-3' : 'p-4'
           )}
         >
-          <Volume2 className={cn(compact ? "w-5 h-5" : "w-6 h-6")} />
+          <Volume2 className={cn(compact ? 'w-5 h-5' : 'w-6 h-6')} />
         </motion.button>
       </div>
 
-      {/* Transcript history - hidden on mobile compact mode */}
+      {/* Transcript history */}
       {!compact && (
         <div className="w-full max-w-md mt-4">
           <div className="bg-white/5 border border-white/10 rounded-xl p-4 min-h-[120px]">
-            <h3 className="text-xs font-semibold uppercase text-white/40 mb-3">
-              Conversation
-            </h3>
+            <h3 className="text-xs font-semibold uppercase text-white/40 mb-3">Conversation</h3>
             <div className="space-y-2">
               <AnimatePresence>
                 {transcript.length === 0 ? (
