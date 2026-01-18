@@ -1,0 +1,79 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { projects, vizNodes } from "@/lib/schema";
+import { DEV_USER_ID } from "@/lib/constants";
+import { apiError, jsonError } from "@/lib/errors";
+
+export const dynamic = "force-dynamic";
+
+const paramsSchema = z.object({
+  nodeId: z.string().uuid()
+});
+
+const bodySchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+  summary2sent: z.string().min(1).max(1000).optional(),
+  pinned: z.boolean().optional()
+});
+
+export async function POST(
+  request: Request,
+  context: { params: { nodeId?: string } }
+) {
+  const parsedParams = paramsSchema.safeParse(context.params);
+  if (!parsedParams.success) {
+    return jsonError(apiError("bad_request", "Invalid node id", 400));
+  }
+
+  const parsedBody = bodySchema.safeParse(await request.json());
+  if (!parsedBody.success) {
+    return jsonError(apiError("bad_request", "Invalid request body", 400));
+  }
+
+  const [node] = await db
+    .select({
+      id: vizNodes.id,
+      projectId: vizNodes.projectId
+    })
+    .from(vizNodes)
+    .innerJoin(projects, eq(projects.id, vizNodes.projectId))
+    .where(
+      and(eq(vizNodes.id, parsedParams.data.nodeId), eq(projects.userId, DEV_USER_ID))
+    )
+    .limit(1);
+
+  if (!node) {
+    return jsonError(apiError("not_found", "Node not found", 404));
+  }
+
+  const updatePayload: Record<string, unknown> = {
+    updatedAt: new Date()
+  };
+
+  if (parsedBody.data.title !== undefined) {
+    updatePayload.title = parsedBody.data.title;
+  }
+  if (parsedBody.data.summary2sent !== undefined) {
+    updatePayload.summary2sent = parsedBody.data.summary2sent;
+  }
+  if (parsedBody.data.pinned !== undefined) {
+    updatePayload.pinned = parsedBody.data.pinned;
+  }
+
+  if (
+    parsedBody.data.title !== undefined ||
+    parsedBody.data.summary2sent !== undefined
+  ) {
+    updatePayload.userEdited = true;
+  }
+
+  await db
+    .update(vizNodes)
+    .set(updatePayload)
+    .where(eq(vizNodes.id, node.id));
+
+  return NextResponse.json({ status: "ok" });
+}
+
