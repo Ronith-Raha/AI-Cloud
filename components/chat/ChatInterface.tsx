@@ -30,7 +30,7 @@ export function ChatInterface({
       {
         id: 'welcome',
         role: 'assistant',
-        content: `Hello! I'm ${agent.name}. I have access to ${agent.memoryCount} memories about you. How can I help you today?`,
+        content: `Hi! I'm ${agent.name}. What would you like to work on today?`,
         timestamp: new Date(),
         agentId: agent.id,
       },
@@ -58,7 +58,7 @@ export function ChatInterface({
       {
         id: 'welcome',
         role: 'assistant',
-        content: `Hello! I'm ${agent.name}. I have access to ${agent.memoryCount} memories about you. How can I help you today?`,
+        content: `Hi! I'm ${agent.name}. What would you like to work on today?`,
         timestamp: new Date(),
         agentId: agent.id,
       },

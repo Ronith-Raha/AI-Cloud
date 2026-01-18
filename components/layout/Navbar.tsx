@@ -21,7 +21,7 @@ const navItems = [
   },
 ];
 
-export function Navbar() {
+export function Navbar({ memoryCount }: { memoryCount?: number }) {
   const pathname = usePathname();
 
   return (
@@ -73,6 +73,12 @@ export function Navbar() {
 
         {/* User/Status Area */}
         <div className="flex items-center gap-4">
+          {typeof memoryCount === 'number' && (
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{memoryCount} memories</span>
+            </div>
+          )}
           <div className="h-8 w-8 rounded-full bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center text-sm font-medium text-white">
             U
           </div>
