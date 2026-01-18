@@ -16,6 +16,42 @@ import { fileURLToPath } from 'node:url';
 
 dotenv.config({ path: '.env.local' });
 
+
+async function compressForLLM(input: string): Promise<{
+  original: string;
+  compressed: string;
+}> {
+  const res = await fetch('https://api.thetokencompany.com/v1/compress', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.TOKEN_API}`,
+    },
+    body: JSON.stringify({
+      model: 'bear-1',
+      compression_settings: {
+        aggressiveness: 0.9,
+        max_output_tokens: null,
+        min_output_tokens: null,
+      },
+      input,
+    }),
+  });
+
+  if (!res.ok) {
+    console.error('Compression failed:', await res.text());
+    return { original: input, compressed: input };
+  }
+
+  const data = await res.json();
+  return {
+    original: input,
+    compressed: data.output ?? input,
+  };
+}
+
+
+
 class Assistant extends voice.Agent {
   constructor() {
     super({
@@ -23,30 +59,11 @@ class Assistant extends voice.Agent {
       You eagerly assist users with their questions by providing information from your extensive knowledge.
       Your responses are concise, to the point, and without any complex formatting or punctuation including emojis, asterisks, or other symbols.
       You are curious, friendly, and have a sense of humor.`,
-
-      // To add tools, specify `tools` in the constructor.
-      // Here's an example that adds a simple weather tool.
-      // You also have to add `import { llm } from '@livekit/agents' and `import { z } from 'zod'` to the top of this file
-      // tools: {
-      //   getWeather: llm.tool({
-      //     description: `Use this tool to look up current weather information in the given location.
-      //
-      //     If the location is not supported by the weather service, the tool will indicate this. You must tell the user the location's weather is unavailable.`,
-      //     parameters: z.object({
-      //       location: z
-      //         .string()
-      //         .describe('The location to look up weather information for (e.g. city name)'),
-      //     }),
-      //     execute: async ({ location }) => {
-      //       console.log(`Looking up weather for ${location}`);
-      //
-      //       return 'sunny with a temperature of 70 degrees.';
-      //     },
-      //   }),
-      // },
     });
   }
 }
+
+
 
 export default defineAgent({
   prewarm: async (proc: JobProcess) => {
@@ -103,6 +120,16 @@ export default defineAgent({
       usageCollector.collect(ev.metrics);
     });
 
+    // Listen for user messages from STT and apply compression
+    session.on(voice.AgentSessionEventTypes.UserInputTranscribed, async (ev) => {
+      const rawMessage = ev.transcript;
+      if (rawMessage && ev.isFinal) {
+        console.log('🗣️ User (raw):', rawMessage);
+        const { compressed } = await compressForLLM(rawMessage);
+        console.log('🗜️ User (compressed):', compressed);
+      }
+    });
+
     const logUsage = async () => {
       const summary = usageCollector.getSummary();
       console.log(`Usage: ${JSON.stringify(summary)}`);
@@ -122,8 +149,11 @@ export default defineAgent({
       },
     });
 
+    console.log('✅ Agent session started and ready');
+
     // Join the room and connect to the user
     await ctx.connect();
+    console.log('✅ Connected to room');
   },
 });
 
