@@ -14,11 +14,12 @@ const paramsSchema = z.object({
 
 export async function GET(
   request: Request,
-  context: { params: { nodeId?: string } }
+  context: { params: Promise<{ nodeId: string }> }
 ) {
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
-  const nodeId = context.params?.nodeId ?? segments.at(-1);
+  const params = await context.params;
+  const nodeId = params?.nodeId ?? segments.at(-1);
   const parsed = paramsSchema.safeParse({ nodeId });
   if (!parsed.success) {
     return jsonError(apiError("bad_request", "Invalid node id", 400));
