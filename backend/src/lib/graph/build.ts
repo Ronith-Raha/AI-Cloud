@@ -2,6 +2,8 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { vizEdges, vizNodes } from "@/lib/schema";
 
+type Tx = Parameters<typeof db.transaction>[0] extends (tx: infer T) => unknown ? T : never;
+
 export const createNodeWithEdge = async ({
   projectId,
   turnId,
@@ -13,7 +15,7 @@ export const createNodeWithEdge = async ({
   title: string | null;
   summary2sent: string;
 }) => {
-  return db.transaction(async (tx: typeof db) => {
+  return db.transaction(async (tx: Tx) => {
     const [previous] = await tx
       .select()
       .from(vizNodes)
