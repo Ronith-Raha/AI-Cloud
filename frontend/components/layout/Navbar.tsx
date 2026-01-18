@@ -1,0 +1,88 @@
+'use client';
+
+import Link from 'next/link';
+import Image from 'next/image';
+import { usePathname } from 'next/navigation';
+import { Brain, MessageSquare } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+
+const navItems = [
+  {
+    href: '/memory',
+    label: 'Memory',
+    icon: Brain,
+    description: 'Explore your memory cloud',
+  },
+  {
+    href: '/chat',
+    label: 'Chat',
+    icon: MessageSquare,
+    description: 'Talk to your agents',
+  },
+];
+
+export function Navbar() {
+  const pathname = usePathname();
+
+  return (
+    <nav className="fixed top-0 left-0 right-0 z-50 h-16 border-b border-white/10 bg-black/80 backdrop-blur-xl hidden md:block">
+      <div className="flex h-full items-center justify-between px-6">
+        {/* Logo - positioned at left corner */}
+        <Link href="/" className="flex items-center gap-3 group">
+          <div className="relative">
+            <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
+            <Image
+              src="/cloudi-logo.png"
+              alt="Cloudi"
+              width={40}
+              height={40}
+              className="relative rounded-lg"
+            />
+          </div>
+          <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+            Cloudi
+          </span>
+        </Link>
+
+        {/* Navigation Links - centered */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+          {navItems.map((item) => {
+            const isActive = pathname === item.href;
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  'relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                  isActive
+                    ? 'text-white'
+                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                )}
+              >
+                {isActive && (
+                  <motion.div
+                    layoutId="navbar-active"
+                    className="absolute inset-0 rounded-lg bg-white/10 border border-white/20"
+                    transition={{ type: 'spring', duration: 0.5 }}
+                  />
+                )}
+                <Icon className="relative h-4 w-4" />
+                <span className="relative">{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+
+        {/* User/Status Area - positioned at right corner */}
+        <div className="flex items-center gap-4">
+          <div className="h-8 w-8 rounded-full bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center text-sm font-medium text-white">
+            U
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+}
