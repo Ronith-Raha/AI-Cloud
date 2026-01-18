@@ -14,6 +14,9 @@ import { useProjectId } from '@/lib/hooks/useProjectId';
 import { createProject, getGraphView, getTurns, listProjects } from '@/lib/api/client';
 import { mapGraphViewToGraphData } from '@/lib/api/graph';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default function ChatPage() {
   const { projectId } = useProjectId();
   const searchParams = useSearchParams();
