@@ -7,10 +7,11 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { AgentSelectorCompact } from '@/components/chat/AgentSelector';
 import { ChatInterface } from '@/components/chat/ChatInterface';
 import { Agent, ChatMessage, GraphNode } from '@/types/nexus';
+import type { TurnTranscriptItem } from '@/lib/api/types';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, PROVIDER_MODELS, agents as baseAgents } from '@/lib/agents';
 import { formatRelativeTime, generateId } from '@/lib/utils';
 import { useProjectId } from '@/lib/hooks/useProjectId';
-import { getGraphNode, getGraphView } from '@/lib/api/client';
+import { getGraphView, getTurns } from '@/lib/api/client';
 import { mapGraphViewToGraphData } from '@/lib/api/graph';
 
 export default function ChatPage() {
@@ -24,12 +25,15 @@ export default function ChatPage() {
   const [chatSessionKey, setChatSessionKey] = useState(0);
   const [initialMessages, setInitialMessages] = useState<ChatMessage[] | null>(null);
   const [selectedTurnError, setSelectedTurnError] = useState<string | null>(null);
-  const [recentChats, setRecentChats] = useState<Array<{
-    nodeId: string;
-    title: string;
-    timestamp: string;
+  const [turns, setTurns] = useState<TurnTranscriptItem[]>([]);
+  const [sessions, setSessions] = useState<Array<{
+    id: string;
     projectId: string;
+    startTurnId: string;
+    createdAt: string;
   }>>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -57,6 +61,37 @@ export default function ChatPage() {
     };
   }, [projectId]);
 
+  useEffect(() => {
+    let isActive = true;
+    if (!projectId) return;
+    getTurns(projectId)
+      .then((response) => {
+        if (!isActive) return;
+        setTurns(response.turns);
+        if (response.turns.length > 0 && sessions.length === 0) {
+          const firstTurn = response.turns[0];
+          const seedSession = {
+            id: generateId(),
+            projectId,
+            startTurnId: firstTurn.turnId,
+            createdAt: firstTurn.createdAt
+          };
+          const next = [seedSession];
+          setSessions(next);
+          persistSessions(next);
+          setCurrentSessionId(seedSession.id);
+        }
+      })
+      .catch(() => {
+        if (!isActive) return;
+        setInitialMessages(null);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [projectId, selectedAgent.id, sessions.length]);
+
   const realNodes = useMemo(() => graphNodes.filter((node) => !node.isGroup), [graphNodes]);
 
   const agents = useMemo(() => {
@@ -82,121 +117,160 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (!projectId || typeof window === 'undefined') return;
-    const raw = window.localStorage.getItem('nexus_recent_chats');
+    const raw = window.localStorage.getItem('nexus_chat_sessions');
     if (!raw) {
-      setRecentChats([]);
+      setSessions([]);
       return;
     }
     try {
       const parsed = JSON.parse(raw) as Array<{
-        nodeId: string;
-        title: string;
-        timestamp: string;
+        id: string;
         projectId: string;
+        startTurnId: string;
+        createdAt: string;
       }>;
-      setRecentChats(parsed.filter((item) => item.projectId === projectId));
+      setSessions(parsed.filter((item) => item.projectId === projectId));
     } catch {
-      setRecentChats([]);
+      setSessions([]);
     }
   }, [projectId]);
 
-  const persistRecentChats = (items: Array<{
-    nodeId: string;
-    title: string;
-    timestamp: string;
+  const persistSessions = (items: Array<{
+    id: string;
     projectId: string;
+    startTurnId: string;
+    createdAt: string;
   }>) => {
     if (typeof window === 'undefined') return;
-    window.localStorage.setItem('nexus_recent_chats', JSON.stringify(items));
+    window.localStorage.setItem('nexus_chat_sessions', JSON.stringify(items));
   };
 
+  const derivedSessions = useMemo(() => {
+    if (sessions.length > 0) return sessions;
+    if (turns.length === 0) return [];
+    const gapMs = 10 * 60 * 1000;
+    const sortedTurns = turns
+      .slice()
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const derived: Array<{ id: string; projectId: string; startTurnId: string; createdAt: string }> = [];
+    let currentStart = sortedTurns[0];
+    derived.push({
+      id: generateId(),
+      projectId: projectId ?? "",
+      startTurnId: currentStart.turnId,
+      createdAt: currentStart.createdAt
+    });
+    for (let i = 1; i < sortedTurns.length; i += 1) {
+      const prev = sortedTurns[i - 1];
+      const curr = sortedTurns[i];
+      const gap = new Date(curr.createdAt).getTime() - new Date(prev.createdAt).getTime();
+      if (gap > gapMs) {
+        derived.push({
+          id: generateId(),
+          projectId: projectId ?? "",
+          startTurnId: curr.turnId,
+          createdAt: curr.createdAt
+        });
+      }
+    }
+    return derived;
+  }, [sessions, turns, projectId]);
+
+  const sessionTurns = useMemo(() => {
+    if (pendingSessionId && currentSessionId === pendingSessionId) {
+      return [];
+    }
+    if (!currentSessionId) return turns;
+    const sortedSessions = derivedSessions
+      .slice()
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const currentIndex = sortedSessions.findIndex((session) => session.id === currentSessionId);
+    if (currentIndex === -1) return turns;
+    const currentSession = sortedSessions[currentIndex];
+    const startIndex = turns.findIndex((turn) => turn.turnId === currentSession.startTurnId);
+    if (startIndex === -1) return turns;
+    const nextSession = sortedSessions[currentIndex + 1];
+    const endIndex = nextSession
+      ? turns.findIndex((turn) => turn.turnId === nextSession.startTurnId)
+      : turns.length;
+    return turns.slice(startIndex, endIndex === -1 ? turns.length : endIndex);
+  }, [turns, derivedSessions, currentSessionId, pendingSessionId]);
+
   const recentConversations = useMemo(() => {
-    if (recentChats.length > 0) {
-      return recentChats
+    if (derivedSessions.length === 0) {
+      return turns
         .slice()
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5)
-        .map((item) => ({
-          id: item.nodeId,
-          title: item.title,
+        .map((turn) => ({
+          id: turn.turnId,
+          title: turn.userText || 'Conversation',
           agent: selectedAgent,
-          timestamp: new Date(item.timestamp)
+          timestamp: new Date(turn.createdAt)
         }));
     }
 
-    return [...realNodes]
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    return derivedSessions
+      .slice()
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 5)
-      .map((node) => ({
-        id: node.id,
-        title: node.summary,
-        agent: selectedAgent,
-        timestamp: node.createdAt
-      }));
-  }, [recentChats, realNodes, selectedAgent]);
+      .map((session) => {
+        const startIndex = turns.findIndex((turn) => turn.turnId === session.startTurnId);
+        const tail = startIndex === -1 ? [] : turns.slice(startIndex);
+        const first = tail[0] ?? turns[startIndex] ?? turns[0];
+        const latest = tail[tail.length - 1] ?? turns[turns.length - 1];
+        return {
+          id: session.id,
+          title: first?.userText || latest?.userText || 'Conversation',
+          agent: selectedAgent,
+          timestamp: latest ? new Date(latest.createdAt) : new Date(session.createdAt)
+        };
+      });
+  }, [derivedSessions, turns, selectedAgent]);
 
   const agentMemories = useMemo(() => realNodes.slice(0, 5), [realNodes]);
 
-  const handleSelectConversation = async (nodeId: string, title: string) => {
-    const isUuid = /^[0-9a-f-]{36}$/i.test(nodeId);
-    const resolveAndOpen = async (resolvedId: string) => {
-      const detail = await getGraphNode(resolvedId);
-      setInitialMessages([
-        {
-          id: generateId(),
-          role: 'user',
-          content: detail.turn.userText,
-          timestamp: new Date(detail.turn.createdAt),
-          agentId: selectedAgent.id
-        },
-        {
-          id: generateId(),
-          role: 'assistant',
-          content: detail.turn.assistantText,
-          timestamp: new Date(detail.turn.createdAt),
-          agentId: selectedAgent.id,
-          turnId: detail.turn.id,
-          nodeId: detail.node.id
-        }
-      ]);
-      setSelectedTurnError(null);
-      setChatSessionKey((prev) => prev + 1);
-    };
-
-    try {
-      if (!isUuid) {
-        throw new Error('Invalid conversation id');
-      }
-      await resolveAndOpen(nodeId);
-    } catch (error) {
-      try {
-        if (!projectId) {
-          throw error;
-        }
-        const view = await getGraphView(projectId, 0, 50);
-        const graphData = mapGraphViewToGraphData(view);
-        const match = graphData.nodes.find((node) => node.summary === title);
-        if (match && /^[0-9a-f-]{36}$/i.test(match.id)) {
-          await resolveAndOpen(match.id);
-          return;
-        }
-      } catch {
-        // fall through to error handling
-      }
-      setSelectedTurnError(
-        error instanceof Error ? error.message : 'Failed to load conversation'
-      );
-    }
+  const handleSelectConversation = (sessionId: string) => {
+    setSelectedTurnError(null);
+    setCurrentSessionId(sessionId);
+    setChatSessionKey((prev) => prev + 1);
   };
 
   const handleNewConversation = () => {
-    setInitialMessages(null);
+    const nextSessionId = generateId();
+    setPendingSessionId(nextSessionId);
+    setCurrentSessionId(nextSessionId);
+    setInitialMessages([]);
     setSelectedTurnError(null);
     setChatSessionKey((prev) => prev + 1);
   };
 
+  useEffect(() => {
+    const transcript: ChatMessage[] = sessionTurns.flatMap((turn) => [
+      {
+        id: generateId(),
+        role: 'user',
+        content: turn.userText,
+        timestamp: new Date(turn.createdAt),
+        agentId: selectedAgent.id,
+        turnId: turn.turnId,
+        nodeId: turn.nodeId ?? undefined
+      },
+      {
+        id: generateId(),
+        role: 'assistant',
+        content: turn.assistantText,
+        timestamp: new Date(turn.createdAt),
+        agentId: selectedAgent.id,
+        turnId: turn.turnId,
+        nodeId: turn.nodeId ?? undefined
+      }
+    ]);
+    setInitialMessages(transcript);
+  }, [sessionTurns, selectedAgent.id]);
+
   return (
-    <MainLayout memoryCount={realNodes.length}>
+    <MainLayout>
       <div className="h-[calc(100vh-64px)] flex">
         {/* Sidebar */}
         <div className="w-80 flex-shrink-0 border-r border-white/10 flex flex-col">
@@ -239,7 +313,7 @@ export default function ChatPage() {
                 recentConversations.map((conv) => (
                   <button
                     key={conv.id}
-                    onClick={() => handleSelectConversation(conv.id, conv.title)}
+                    onClick={() => handleSelectConversation(conv.id)}
                     className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 transition-colors text-left"
                   >
                     <span className="text-lg flex-shrink-0">{conv.agent.avatar}</span>
@@ -313,7 +387,7 @@ export default function ChatPage() {
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-sm text-white/70">
-                    {selectedAgent.memoryCount} memories
+                    {realNodes.length} memories
                   </p>
                   <p className="text-xs text-white/40">
                     Last: {isClient ? formatRelativeTime(selectedAgent.lastInteraction) : '—'}
@@ -387,35 +461,57 @@ export default function ChatPage() {
                     // silent refresh failure
                   });
 
-                getGraphNode(payload.nodeId)
-                  .then((detail) => {
-                    const entry = {
-                      nodeId: payload.nodeId,
-                      title: detail.turn.userText || payload.userText || 'Conversation',
-                      timestamp: detail.turn.createdAt,
-                      projectId
-                    };
-                    setRecentChats((prev) => {
-                      const next = [entry, ...prev.filter((item) => item.nodeId !== entry.nodeId)]
-                        .slice(0, 20);
-                      persistRecentChats(next);
-                      return next;
-                    });
+                getTurns(projectId)
+                  .then((response) => {
+                    setTurns(response.turns);
+                    const transcript: ChatMessage[] = response.turns.flatMap((turn) => [
+                      {
+                        id: generateId(),
+                        role: 'user',
+                        content: turn.userText,
+                        timestamp: new Date(turn.createdAt),
+                        agentId: selectedAgent.id,
+                        turnId: turn.turnId,
+                        nodeId: turn.nodeId ?? undefined
+                      },
+                      {
+                        id: generateId(),
+                        role: 'assistant',
+                        content: turn.assistantText,
+                        timestamp: new Date(turn.createdAt),
+                        agentId: selectedAgent.id,
+                        turnId: turn.turnId,
+                        nodeId: turn.nodeId ?? undefined
+                      }
+                    ]);
+                    setInitialMessages(transcript);
+
+                    if (pendingSessionId && response.turns.length > 0) {
+                      const firstNew = response.turns.find(
+                        (turn) => turn.turnId === payload.turnId
+                      );
+                      if (firstNew) {
+                        const nextSession = {
+                          id: pendingSessionId,
+                          projectId,
+                          startTurnId: firstNew.turnId,
+                          createdAt: firstNew.createdAt
+                        };
+                        const nextSessions = [nextSession, ...sessions].slice(0, 50);
+                        setSessions(nextSessions);
+                        persistSessions(nextSessions);
+                        setCurrentSessionId(nextSession.id);
+                        setPendingSessionId(null);
+                      }
+                    }
                   })
                   .catch(() => {
-                    const entry = {
-                      nodeId: payload.nodeId,
-                      title: payload.userText || 'Conversation',
-                      timestamp: new Date().toISOString(),
-                      projectId
-                    };
-                    setRecentChats((prev) => {
-                      const next = [entry, ...prev.filter((item) => item.nodeId !== entry.nodeId)]
-                        .slice(0, 20);
-                      persistRecentChats(next);
-                      return next;
-                    });
+                    // silent refresh failure
                   });
+
+                if (payload.nodeId) {
+                  // session persistence handled via turns + session markers
+                }
               }}
             />
           </div>

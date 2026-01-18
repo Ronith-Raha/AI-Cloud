@@ -9,7 +9,8 @@ import type {
   GraphNodeMutationResponse,
   GraphViewResponse,
   InjectedContextResponse,
-  ProjectListResponse
+  ProjectListResponse,
+  TurnTranscriptResponse
 } from "./types";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3000";
@@ -116,6 +117,17 @@ export async function restoreGraphNode(nodeId: string) {
 
 export async function getInjectedContext(turnId: string) {
   return requestJson<InjectedContextResponse>(`/api/chat/turn/${turnId}/injected`);
+}
+
+export async function getTurns(projectId: string, limit = 200, cursor?: string) {
+  const params = new URLSearchParams({
+    projectId,
+    limit: String(limit)
+  });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return requestJson<TurnTranscriptResponse>(`/api/chat/turns?${params.toString()}`);
 }
 
 function parseSseMessage(raw: string) {

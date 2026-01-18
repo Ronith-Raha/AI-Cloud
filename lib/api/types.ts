@@ -41,6 +41,21 @@ export interface InjectedContextResponse {
   injectedContextText: string;
 }
 
+export interface TurnTranscriptItem {
+  turnId: string;
+  nodeId: string | null;
+  createdAt: string;
+  provider: ProviderName;
+  model: string;
+  userText: string;
+  assistantText: string;
+}
+
+export interface TurnTranscriptResponse {
+  turns: TurnTranscriptItem[];
+  nextCursor: string | null;
+}
+
 export interface VizNode {
   id: string;
   projectId: string;

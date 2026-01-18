@@ -52,6 +52,20 @@ export function ChatInterface({
     scrollToBottom();
   }, [messages, phase]);
 
+  useEffect(() => {
+    if (!initialMessages) return;
+    const base: ChatMessage[] = [
+      {
+        id: 'welcome',
+        role: 'assistant',
+        content: `Hello! I'm ${agent.name}. I have access to ${agent.memoryCount} memories about you. How can I help you today?`,
+        timestamp: new Date(),
+        agentId: agent.id,
+      },
+    ];
+    setMessages([...base, ...initialMessages]);
+  }, [initialMessages, agent.id, agent.name, agent.memoryCount]);
+
   const handleSend = async () => {
     if (!input.trim() || phase.status !== 'idle' || isStreaming || !projectId) return;
 
