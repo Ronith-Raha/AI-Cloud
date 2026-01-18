@@ -38,18 +38,19 @@ export async function GET(request: Request) {
     return jsonError(apiError("not_found", "Project not found", 404));
   }
 
-  const nodeQuery = db
+  const nodeWhere = [
+    eq(vizNodes.projectId, parsed.data.projectId),
+    ...(parsed.data.includeDeleted ? [] : [isNull(vizNodes.deletedAt)])
+  ];
+
+  const nodes = await db
     .select()
     .from(vizNodes)
-    .where(eq(vizNodes.projectId, parsed.data.projectId));
-
-  const nodes = await (parsed.data.includeDeleted
-    ? nodeQuery
-    : nodeQuery.where(isNull(vizNodes.deletedAt)))
+    .where(and(...nodeWhere))
     .orderBy(desc(vizNodes.createdAt))
     .limit(parsed.data.limit);
 
-  const nodeIds = nodes.map((node) => node.id);
+  const nodeIds = nodes.map((node: typeof vizNodes.$inferSelect) => node.id);
   const edges =
     nodeIds.length > 0
       ? await db
