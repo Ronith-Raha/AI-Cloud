@@ -38,3 +38,5 @@ AI Services/APIs: OpenAI API Gemini API Anthropic (Claude) API LiveKit API TheTo
 # What's next for Cloudi
 For the future, we aim to make Cloudi an AI companion that is integrated into daily life, constantly learning about you, mirroring your actions, and providing you with valuable insights. In terms of design, we will add a better filtering, pinning, and editing system for the memories. We will also add physics that show categories breaking into smaller units. In terms of the infrastructure, we aim to secure our database and prepare our product for the market. We also hope to gain partnerships with more AI agents to diversify our models and chat memories. In order to make the most use of storage and context windows, we would like to use tools that reduce our tokens and provide a succinct summary of memories.
 
+# License
+This project is licensed under the MIT License - see the LICENSE file for details.
