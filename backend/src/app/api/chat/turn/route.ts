@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { DEV_USER_ID } from "@/lib/constants";
+import { getUserId } from "@/lib/auth";
+import { SUMMARY_MODELS } from "@/lib/constants";
 import {
   projectZep,
   projects,
@@ -53,6 +54,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const userId = getUserId(request);
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -66,7 +69,7 @@ export async function POST(request: Request) {
           .select()
           .from(projects)
           .where(
-            and(eq(projects.id, payload.projectId), eq(projects.userId, DEV_USER_ID))
+            and(eq(projects.id, payload.projectId), eq(projects.userId, userId))
           )
           .limit(1);
 
@@ -79,13 +82,13 @@ export async function POST(request: Request) {
           .insert(projectZep)
           .values({
             projectId: payload.projectId,
-            zepUserId: DEV_USER_ID,
+            zepUserId: userId,
             zepSessionId: payload.projectId
           })
           .onConflictDoUpdate({
             target: projectZep.projectId,
             set: {
-              zepUserId: DEV_USER_ID,
+              zepUserId: userId,
               zepSessionId: payload.projectId
             }
           });
@@ -106,7 +109,7 @@ export async function POST(request: Request) {
 
         let zepContext = "";
         try {
-          zepContext = await zepGetContext(payload.projectId, DEV_USER_ID);
+          zepContext = await zepGetContext(payload.projectId, userId);
         } catch (error) {
           zepContext = "";
         }
@@ -165,7 +168,7 @@ export async function POST(request: Request) {
 
         for await (const chunk of adapter.streamChat({
           model: payload.model,
-          system: "",
+          system: injectedContext.split("[User Message]")[0],
           context: injectedContext,
           userText: payload.userText
         })) {
@@ -180,9 +183,10 @@ export async function POST(request: Request) {
 
         const latencyMs = Date.now() - startTime;
 
+        const summaryModel = SUMMARY_MODELS[payload.provider] ?? payload.model;
         const summary = await summarizeTurn({
           provider: payload.provider as ProviderName,
-          model: payload.model,
+          model: summaryModel,
           userText: payload.userText,
           assistantText
         });
@@ -219,7 +223,7 @@ export async function POST(request: Request) {
         });
 
         try {
-          await zepAddMessages(payload.projectId, DEV_USER_ID, [
+          await zepAddMessages(payload.projectId, userId, [
             { role: "user", content: payload.userText },
             { role: "assistant", content: assistantText }
           ]);
@@ -229,14 +233,18 @@ export async function POST(request: Request) {
 
         sendEvent("complete", { turnId: turn.id, nodeId: node.id });
       } catch (error) {
-        const err =
-          typeof error === "object" && error && "code" in error
-            ? (error as { code: string; message?: string })
-            : { code: "provider_error", message: "Provider request failed" };
-        sendEvent("error", {
-          code: err.code,
-          message: err.message ?? "Provider request failed"
-        });
+        try {
+          const err =
+            typeof error === "object" && error && "code" in error
+              ? (error as { code: string; message?: string })
+              : { code: "provider_error", message: "Provider request failed" };
+          sendEvent("error", {
+            code: err.code,
+            message: err.message ?? "Provider request failed"
+          });
+        } catch (_) {
+          /* sendEvent itself failed — stream may already be closed */
+        }
       } finally {
         controller.close();
       }
@@ -245,4 +253,3 @@ export async function POST(request: Request) {
 
   return new Response(stream, { headers: sseHeaders });
 }
-

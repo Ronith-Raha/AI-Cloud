@@ -23,40 +23,34 @@ const getTextFromContent = (
     .join("");
 
 const normalizeModel = (model: string) => {
-  if (model === "claude-3-5-sonnet-latest") {
-    return "claude-3-sonnet-20240229";
+  if (model === "claude-3-5-sonnet-latest" || model.startsWith("claude-3-5-sonnet")) {
+    return "claude-3-5-sonnet-20241022";
   }
-  if (model === "claude-3-5-haiku-latest") {
-    return "claude-3-haiku-20240307";
-  }
-  if (model === "claude-3-5-sonnet-20240620") {
-    return "claude-3-sonnet-20240229";
-  }
-  if (model === "claude-3-5-haiku-20240307") {
-    return "claude-3-haiku-20240307";
-  }
-  if (model.startsWith("claude-3-5-sonnet")) {
-    return "claude-3-haiku-20240307";
-  }
-  if (model.startsWith("claude-3-5-haiku")) {
-    return "claude-3-haiku-20240307";
-  }
-  if (model.startsWith("claude-3-sonnet")) {
-    return "claude-3-haiku-20240307";
+  if (model === "claude-3-5-haiku-latest" || model.startsWith("claude-3-5-haiku")) {
+    return "claude-3-5-haiku-20241022";
   }
   if (model.startsWith("claude-3-opus")) {
+    return "claude-3-opus-20240229";
+  }
+  if (model.startsWith("claude-3-sonnet")) {
+    return "claude-3-sonnet-20240229";
+  }
+  if (model.startsWith("claude-3-haiku")) {
     return "claude-3-haiku-20240307";
   }
   return model;
 };
 
+const DEFAULT_MAX_TOKENS = 4096;
+
 export const anthropicAdapter: ProviderAdapter = {
-  async *streamChat({ model, context, system }) {
+  async *streamChat({ model, context, system, maxTokens }) {
     try {
       const resolvedModel = normalizeModel(model);
+      const resolvedMaxTokens = maxTokens ?? DEFAULT_MAX_TOKENS;
       const stream = await client.messages.create({
         model: resolvedModel,
-        max_tokens: 1024,
+        max_tokens: resolvedMaxTokens,
         system,
         messages: [{ role: "user", content: context }],
         stream: true
@@ -78,12 +72,12 @@ export const anthropicAdapter: ProviderAdapter = {
       throw normalizeError(error);
     }
   },
-  async complete({ model, prompt, system }) {
+  async complete({ model, prompt, system, maxTokens }) {
     try {
       const resolvedModel = normalizeModel(model);
       const response = await client.messages.create({
         model: resolvedModel,
-        max_tokens: 400,
+        max_tokens: maxTokens ?? 400,
         system,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2
@@ -99,4 +93,3 @@ export const anthropicAdapter: ProviderAdapter = {
     }
   }
 };
-

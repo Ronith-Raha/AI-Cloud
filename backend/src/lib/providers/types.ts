@@ -11,12 +11,14 @@ export type StreamChatArgs = {
   system: string;
   context: string;
   userText: string;
+  maxTokens?: number;
 };
 
 export type CompleteArgs = {
   model: string;
   system: string;
   prompt: string;
+  maxTokens?: number;
 };
 
 export type ProviderAdapter = {
@@ -33,4 +35,3 @@ export type ProviderError = {
   message: string;
   retryable: boolean;
 };
-
