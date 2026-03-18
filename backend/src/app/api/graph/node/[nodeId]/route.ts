@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, turns, vizNodes } from "@/lib/schema";
-import { DEV_USER_ID } from "@/lib/constants";
+import { getUserId } from "@/lib/auth";
 import { apiError, jsonError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ nodeId: string }> }
 ) {
+  const userId = getUserId(request);
   const url = new URL(request.url);
   const segments = url.pathname.split("/").filter(Boolean);
   const params = await context.params;
@@ -41,7 +42,7 @@ export async function GET(
     .innerJoin(projects, eq(projects.id, vizNodes.projectId))
     .innerJoin(turns, eq(turns.id, vizNodes.turnId))
     .where(
-      and(eq(vizNodes.id, parsed.data.nodeId), eq(projects.userId, DEV_USER_ID))
+      and(eq(vizNodes.id, parsed.data.nodeId), eq(projects.userId, userId))
     )
     .limit(1);
 
@@ -51,4 +52,3 @@ export async function GET(
 
   return NextResponse.json(rows[0]);
 }
-

@@ -2,63 +2,62 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { turns, projects } from "@/lib/schema";
-import { DEV_USER_ID } from "@/lib/constants";
+import { projects, turns } from "@/lib/schema";
+import { getUserId } from "@/lib/auth";
 import { apiError, jsonError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
-const turnIdSchema = z.string().uuid();
-const updateSchema = z
-  .object({
-    userText: z.string().trim().min(1).optional(),
-    assistantText: z.string().trim().min(1).optional()
-  })
-  .refine((data) => data.userText || data.assistantText, {
-    message: "No updates provided"
-  });
+const paramsSchema = z.object({
+  turnId: z.string().uuid()
+});
+
+const bodySchema = z.object({
+  userText: z.string().optional(),
+  assistantText: z.string().optional()
+});
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ turnId: string }> }
 ) {
-  const url = new URL(request.url);
-  const segments = url.pathname.split("/").filter(Boolean);
+  const userId = getUserId(request);
   const params = await context.params;
-  const turnId = params?.turnId ?? segments.at(-1);
-  const parsed = turnIdSchema.safeParse(turnId);
+  const parsed = paramsSchema.safeParse({ turnId: params?.turnId });
   if (!parsed.success) {
     return jsonError(apiError("bad_request", "Invalid turn id", 400));
   }
 
-  let payload: z.infer<typeof updateSchema>;
+  let body: z.infer<typeof bodySchema>;
   try {
-    payload = updateSchema.parse(await request.json());
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid payload";
-    return jsonError(apiError("bad_request", message, 400));
+    body = bodySchema.parse(await request.json());
+  } catch {
+    return jsonError(apiError("bad_request", "Invalid request body", 400));
   }
 
-  const rows = await db
+  const turn = await db
     .select({ id: turns.id })
     .from(turns)
     .innerJoin(projects, eq(projects.id, turns.projectId))
-    .where(and(eq(turns.id, parsed.data), eq(projects.userId, DEV_USER_ID)))
+    .where(
+      and(eq(turns.id, parsed.data.turnId), eq(projects.userId, userId))
+    )
     .limit(1);
 
-  if (rows.length === 0) {
+  if (turn.length === 0) {
     return jsonError(apiError("not_found", "Turn not found", 404));
   }
 
-  await db
-    .update(turns)
-    .set({
-      ...(payload.userText ? { userText: payload.userText } : {}),
-      ...(payload.assistantText ? { assistantText: payload.assistantText } : {})
-    })
-    .where(eq(turns.id, parsed.data));
+  const updates: Record<string, unknown> = {};
+  if (body.userText !== undefined) updates.userText = body.userText;
+  if (body.assistantText !== undefined) updates.assistantText = body.assistantText;
+
+  if (Object.keys(updates).length > 0) {
+    await db
+      .update(turns)
+      .set(updates)
+      .where(eq(turns.id, parsed.data.turnId));
+  }
 
   return NextResponse.json({ status: "ok" });
 }
-
-

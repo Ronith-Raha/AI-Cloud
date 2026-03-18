@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, vizNodes } from "@/lib/schema";
-import { DEV_USER_ID } from "@/lib/constants";
+import { getUserId } from "@/lib/auth";
 import { apiError, jsonError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -16,35 +16,30 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ nodeId: string }> }
 ) {
-  const url = new URL(request.url);
-  const segments = url.pathname.split("/").filter(Boolean);
+  const userId = getUserId(request);
   const params = await context.params;
-  const nodeId = params?.nodeId ?? segments.at(-2);
-  const parsedParams = paramsSchema.safeParse({ nodeId });
-  if (!parsedParams.success) {
+  const parsed = paramsSchema.safeParse({ nodeId: params?.nodeId });
+  if (!parsed.success) {
     return jsonError(apiError("bad_request", "Invalid node id", 400));
   }
 
-  const [node] = await db
-    .select({
-      id: vizNodes.id
-    })
+  const node = await db
+    .select({ id: vizNodes.id })
     .from(vizNodes)
     .innerJoin(projects, eq(projects.id, vizNodes.projectId))
     .where(
-      and(eq(vizNodes.id, parsedParams.data.nodeId), eq(projects.userId, DEV_USER_ID))
+      and(eq(vizNodes.id, parsed.data.nodeId), eq(projects.userId, userId))
     )
     .limit(1);
 
-  if (!node) {
+  if (node.length === 0) {
     return jsonError(apiError("not_found", "Node not found", 404));
   }
 
   await db
     .update(vizNodes)
     .set({ deletedAt: null, updatedAt: new Date() })
-    .where(eq(vizNodes.id, node.id));
+    .where(eq(vizNodes.id, parsed.data.nodeId));
 
   return NextResponse.json({ status: "ok" });
 }
-

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { projects } from "@/lib/schema";
-import { DEV_USER_ID } from "@/lib/constants";
+import { getUserId } from "@/lib/auth";
 import { apiError, jsonError } from "@/lib/errors";
 import { desc, eq } from "drizzle-orm";
 
@@ -20,12 +20,14 @@ export async function POST(request: Request) {
     return jsonError(apiError("bad_request", "Invalid request body", 400));
   }
 
+  const userId = getUserId(request);
+
   try {
     const [project] = await db
       .insert(projects)
       .values({
         name: body.name,
-        userId: DEV_USER_ID
+        userId
       })
       .returning();
 
@@ -35,12 +37,14 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const userId = getUserId(request);
+
   try {
     const rows = await db
       .select()
       .from(projects)
-      .where(eq(projects.userId, DEV_USER_ID))
+      .where(eq(projects.userId, userId))
       .orderBy(desc(projects.createdAt));
     return NextResponse.json({
       projects: rows.map(
@@ -55,5 +59,3 @@ export async function GET() {
     return jsonError(apiError("server_error", "Failed to list projects", 500));
   }
 }
-
-

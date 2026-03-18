@@ -2,23 +2,23 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { turns, projects } from "@/lib/schema";
-import { DEV_USER_ID } from "@/lib/constants";
+import { projects, turns } from "@/lib/schema";
+import { getUserId } from "@/lib/auth";
 import { apiError, jsonError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
-const turnIdSchema = z.string().uuid();
+const paramsSchema = z.object({
+  turnId: z.string().uuid()
+});
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ turnId: string }> }
 ) {
-  const url = new URL(request.url);
-  const segments = url.pathname.split("/").filter(Boolean);
+  const userId = getUserId(request);
   const params = await context.params;
-  const turnId = params?.turnId ?? segments.at(-2);
-  const parsed = turnIdSchema.safeParse(turnId);
+  const parsed = paramsSchema.safeParse({ turnId: params?.turnId });
   if (!parsed.success) {
     return jsonError(apiError("bad_request", "Invalid turn id", 400));
   }
@@ -31,7 +31,9 @@ export async function GET(
     })
     .from(turns)
     .innerJoin(projects, eq(projects.id, turns.projectId))
-    .where(and(eq(turns.id, parsed.data), eq(projects.userId, DEV_USER_ID)))
+    .where(
+      and(eq(turns.id, parsed.data.turnId), eq(projects.userId, userId))
+    )
     .limit(1);
 
   if (rows.length === 0) {
@@ -40,4 +42,3 @@ export async function GET(
 
   return NextResponse.json(rows[0]);
 }
-

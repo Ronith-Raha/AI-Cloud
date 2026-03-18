@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { projects, vizEdges, vizNodes } from "@/lib/schema";
-import { DEV_USER_ID } from "@/lib/constants";
+import { getUserId } from "@/lib/auth";
 import { apiError, jsonError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,7 @@ const querySchema = z.object({
 });
 
 export async function GET(request: Request) {
+  const userId = getUserId(request);
   const url = new URL(request.url);
   const parsed = querySchema.safeParse({
     projectId: url.searchParams.get("projectId"),
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
   const project = await db
     .select()
     .from(projects)
-    .where(and(eq(projects.id, parsed.data.projectId), eq(projects.userId, DEV_USER_ID)))
+    .where(and(eq(projects.id, parsed.data.projectId), eq(projects.userId, userId)))
     .limit(1);
 
   if (project.length === 0) {
@@ -72,4 +73,3 @@ export async function GET(request: Request) {
     edges
   });
 }
-

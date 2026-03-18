@@ -8,8 +8,8 @@ const allowedOrigins = (process.env.CORS_ORIGIN ?? defaultOrigin)
   .filter(Boolean);
 
 const baseCorsHeaders = {
-  "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key"
+  "Access-Control-Allow-Methods": "GET,POST,PATCH,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-user-id"
 };
 
 const getCorsHeaders = (origin: string | null) => {
@@ -37,4 +37,3 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: ["/api/:path*"]
 };
-

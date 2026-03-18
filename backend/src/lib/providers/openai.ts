@@ -16,14 +16,18 @@ const normalizeError = (error: unknown): ProviderError => {
 };
 
 export const openaiAdapter: ProviderAdapter = {
-  async *streamChat({ model, context, system, userText }) {
-    void system;
-    void userText;
+  async *streamChat({ model, context, system }) {
     try {
+      const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+      if (system) {
+        messages.push({ role: "system", content: system });
+      }
+      messages.push({ role: "user", content: context });
+
       const stream = await client.chat.completions.create({
         model,
         stream: true,
-        messages: [{ role: "user", content: context }]
+        messages
       });
 
       for await (const chunk of stream) {
@@ -60,4 +64,3 @@ export const openaiAdapter: ProviderAdapter = {
     }
   }
 };
-
