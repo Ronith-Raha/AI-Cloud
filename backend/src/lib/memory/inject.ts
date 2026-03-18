@@ -98,8 +98,13 @@ export const buildInjectedContext = ({
   const memoryContext =
     memoryContextOverride !== undefined ? memoryContextOverride : pinnedLines;
   sections.push(`[Pinned Context]\n\n${memoryContext}`);
+
+  const filteredZep = filterZepContext(zepContext, userText);
+  if (filteredZep) {
+    sections.push(`[Relevant Memory]\n\n${filteredZep}`);
+  }
+
   sections.push(`[User Message]\n\n${userText}`);
 
   return sections.join("\n\n");
 };
-
