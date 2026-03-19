@@ -6,18 +6,18 @@ const globalForDb = globalThis as unknown as {
   postgresClient?: postgres.Sql;
 };
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is not set");
-}
+const getClient = () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is not set");
+  }
+  if (!globalForDb.postgresClient) {
+    globalForDb.postgresClient = postgres(databaseUrl, {
+      max: 1,
+      prepare: false
+    });
+  }
+  return globalForDb.postgresClient;
+};
 
-const client =
-  globalForDb.postgresClient ??
-  postgres(databaseUrl, {
-    max: 10
-  });
-
-globalForDb.postgresClient = client;
-
-export const db = drizzle(client, { schema });
-
+export const db = drizzle(getClient(), { schema });
