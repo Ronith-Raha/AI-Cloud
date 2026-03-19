@@ -1,8 +1,13 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { ProviderAdapter, ProviderError } from "@/lib/providers/types";
 
-const apiKey = process.env.GEMINI_API_KEY ?? "";
-const client = new GoogleGenerativeAI(apiKey);
+let _client: GoogleGenerativeAI | null = null;
+const getClient = () => {
+  if (!_client) {
+    _client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
+  }
+  return _client;
+};
 
 const normalizeError = (error: unknown): ProviderError => {
   const message =
@@ -17,6 +22,7 @@ const normalizeError = (error: unknown): ProviderError => {
 export const geminiAdapter: ProviderAdapter = {
   async *streamChat({ model, context, system }) {
     try {
+      const client = getClient();
       const gemini = client.getGenerativeModel({
         model,
         systemInstruction: system || undefined
@@ -38,6 +44,7 @@ export const geminiAdapter: ProviderAdapter = {
   },
   async complete({ model, prompt, system }) {
     try {
+      const client = getClient();
       const gemini = client.getGenerativeModel({
         model,
         systemInstruction: system || undefined
@@ -55,4 +62,3 @@ export const geminiAdapter: ProviderAdapter = {
     }
   }
 };
-

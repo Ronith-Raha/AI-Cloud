@@ -1,9 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ProviderAdapter, ProviderError } from "@/lib/providers/types";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-});
+let _client: Anthropic | null = null;
+const getClient = () => {
+  if (!_client) {
+    _client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  }
+  return _client;
+};
 
 const normalizeError = (error: unknown): ProviderError => {
   const message =
@@ -46,6 +50,7 @@ const DEFAULT_MAX_TOKENS = 4096;
 export const anthropicAdapter: ProviderAdapter = {
   async *streamChat({ model, context, system, maxTokens }) {
     try {
+      const client = getClient();
       const resolvedModel = normalizeModel(model);
       const resolvedMaxTokens = maxTokens ?? DEFAULT_MAX_TOKENS;
       const stream = await client.messages.create({
@@ -74,6 +79,7 @@ export const anthropicAdapter: ProviderAdapter = {
   },
   async complete({ model, prompt, system, maxTokens }) {
     try {
+      const client = getClient();
       const resolvedModel = normalizeModel(model);
       const response = await client.messages.create({
         model: resolvedModel,

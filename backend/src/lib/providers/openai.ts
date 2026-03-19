@@ -1,9 +1,13 @@
 import OpenAI from "openai";
 import { ProviderError, ProviderAdapter } from "@/lib/providers/types";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+let _client: OpenAI | null = null;
+const getClient = () => {
+  if (!_client) {
+    _client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _client;
+};
 
 const normalizeError = (error: unknown): ProviderError => {
   const message =
@@ -18,6 +22,7 @@ const normalizeError = (error: unknown): ProviderError => {
 export const openaiAdapter: ProviderAdapter = {
   async *streamChat({ model, context, system }) {
     try {
+      const client = getClient();
       const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
       if (system) {
         messages.push({ role: "system", content: system });
@@ -46,6 +51,7 @@ export const openaiAdapter: ProviderAdapter = {
   },
   async complete({ model, prompt, system }) {
     try {
+      const client = getClient();
       const response = await client.chat.completions.create({
         model,
         messages: [
