@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const defaultOrigin = "http://localhost:3001";
-const allowedOrigins = (process.env.CORS_ORIGIN ?? defaultOrigin)
+const envOrigins = (process.env.CORS_ORIGIN ?? "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -12,11 +11,27 @@ const baseCorsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-user-id"
 };
 
+const isAllowedOrigin = (origin: string) => {
+  // Always allow localhost for dev
+  if (origin.startsWith("http://localhost:")) return true;
+  // Allow any Vercel preview/production URL
+  if (origin.endsWith(".vercel.app") && origin.startsWith("https://")) return true;
+  // Allow explicitly configured origins
+  if (envOrigins.includes(origin)) return true;
+  return false;
+};
+
 const getCorsHeaders = (origin: string | null) => {
-  const allowedOrigin = origin && allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+  if (origin && isAllowedOrigin(origin)) {
+    return {
+      ...baseCorsHeaders,
+      "Access-Control-Allow-Origin": origin
+    };
+  }
+  // Fallback: if env origins configured, use the first one; otherwise block
   return {
     ...baseCorsHeaders,
-    "Access-Control-Allow-Origin": allowedOrigin
+    "Access-Control-Allow-Origin": envOrigins[0] ?? "http://localhost:3001"
   };
 };
 
